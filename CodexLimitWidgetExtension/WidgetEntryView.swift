@@ -18,6 +18,7 @@ struct CodexLimitWidgetEntryView: View {
             widgetBackground
         }
         .environment(\.locale, entry.preferences.appLanguage.locale)
+        .environment(\.syncReferenceDate, entry.date)
         .widgetURL(entry.preferences.widgetClickAction.widgetLink)
     }
 
@@ -64,9 +65,9 @@ struct CodexLimitWidgetEntryView: View {
 private extension WidgetClickAction {
     var widgetLink: URL? {
         switch self {
-        case .app: return URL(string: "codexlimitwidget://open")
-        case .details: return URL(string: "codexlimitwidget://details")
-        case .codex: return URL(string: "codexlimitwidget://codex")
+        case .app: return URL(string: "codexlimitwidgetcustom://open")
+        case .details: return URL(string: "codexlimitwidgetcustom://details")
+        case .codex: return URL(string: "codexlimitwidgetcustom://codex")
         }
     }
 }

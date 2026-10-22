@@ -238,7 +238,7 @@ private struct ReleaseNotesView: View {
                     Text("What's new")
                         .font(palette.titleFont)
                         .foregroundStyle(palette.titleText)
-                    Text("Codex Limit Widget v\(currentVersion)")
+                    Text("Maestro Limit v\(currentVersion)")
                         .font(palette.noteFont)
                         .foregroundStyle(palette.mutedText)
                 }

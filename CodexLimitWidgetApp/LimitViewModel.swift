@@ -4,10 +4,11 @@ import os
 import ServiceManagement
 @preconcurrency import UserNotifications
 import WidgetKit
+import IOKit.ps
 
 enum LoginItemRegistrationPolicy {
-    static let canonicalBundleIdentifier = "com.sergeylopukhov.CodexLimitWidget"
-    static let canonicalApplicationPath = "/Applications/Codex Limit Widget.app"
+    static let canonicalBundleIdentifier = "com.calaborhoc.CodexLimitWidgetCustom"
+    static let canonicalApplicationPath = "/Applications/Maestro Limit.app"
 
     static func shouldRegister(bundleIdentifier: String?, bundleURL: URL, isDebugBuild: Bool) -> Bool {
         guard !isDebugBuild,
@@ -22,6 +23,58 @@ enum LoginItemRegistrationPolicy {
             .resolvingSymlinksInPath()
 
         return candidateURL.path == canonicalURL.path
+    }
+}
+
+/// Persisted opportunities are independent of app restarts and model results.
+struct ResetRollingState: Codable {
+    var boundaries: [String: Date] = [:]
+    var attempted: Set<String> = []
+    var lastAttempt: Date?
+
+    static var url: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CodexLimitWidgetCustom/reset-rolling-state.json")
+    }
+
+    static func load() -> Self {
+        guard FileManager.default.fileExists(atPath: url.path) else { return Self() }
+        // A damaged reservation file must fail closed instead of duplicating a send.
+        return (try? JSONDecoder().decode(Self.self, from: Data(contentsOf: url)))
+            ?? Self(lastAttempt: .distantFuture)
+    }
+
+    func save() throws {
+        try FileManager.default.createDirectory(at: Self.url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(self).write(to: Self.url, options: .atomic)
+    }
+
+    mutating func observe(_ snapshot: LimitSnapshot, now: Date) {
+        for (name, window) in [("5H", snapshot.fiveHour), ("WEEK", snapshot.weekly)] {
+            guard let window, let reset = window.resetsAt else { continue }
+            if let existing = boundaries[name] {
+                // New actual usage has already anchored the next window. No ping
+                // is needed; an advancing zero-usage clock is not confirmation.
+                if reset.timeIntervalSince(existing) > 60 && window.usedPercent > 0 && reset > now {
+                    boundaries[name] = reset
+                }
+            } else if window.usedPercent > 0 || reset <= now {
+                boundaries[name] = reset
+            }
+        }
+    }
+
+    func dueOpportunities(_ snapshot: LimitSnapshot, now: Date) -> [String] {
+        guard now.timeIntervalSince(snapshot.updatedAt) < 90,
+              let weekly = snapshot.weekly, weekly.usedPercent < 99,
+              (snapshot.fiveHour?.usedPercent ?? 0) < 100,
+              lastAttempt.map({ now.timeIntervalSince($0) >= 3600 }) ?? true else { return [] }
+        return boundaries.sorted { $0.key < $1.key }.compactMap { name, reset in
+            let window = name == "5H" ? snapshot.fiveHour : snapshot.weekly
+            guard window != nil, now.timeIntervalSince(reset) >= 60 else { return nil }
+            let key = "\(name):\(Int(reset.timeIntervalSince1970 / 60))"
+            return attempted.contains(key) ? nil : key
+        }
     }
 }
 
@@ -45,6 +98,159 @@ final class LimitViewModel: ObservableObject {
     private let loginItemSetupKey = "loginItemRegistrationCompleted"
     private var timer: Timer?
     private var started = false
+    private var lastAutomaticRefreshAt: Date?
+    private var lastObservedPowerSource: String?
+    private var rollingState = ResetRollingState.load()
+    private var isStartingResetWindow = false
+
+    private func recordPollingEvent(_ event: String, source: String, interval: TimeInterval, extra: [String: Any] = [:]) {
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CodexLimitWidgetCustom/polling-logs", isDirectory: true)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: Date())
+        let url = directory.appendingPathComponent("polling-\(stamp.prefix(10)).jsonl")
+        var record: [String: Any] = ["timestamp": stamp, "event": event, "powerSource": source,
+                                     "intervalSeconds": interval, "pid": ProcessInfo.processInfo.processIdentifier,
+                                     "app": "Maestro Limit", "logSchema": 2,
+                                     "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"]
+        record.merge(extra) { _, new in new }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            var data = try JSONSerialization.data(withJSONObject: record, options: [.sortedKeys])
+            data.append(0x0A)
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+            }
+            let file = try FileHandle(forWritingTo: url)
+            defer { try? file.close() }
+            try file.seekToEnd()
+            try file.write(contentsOf: data)
+        } catch {
+            LimitLog.store.error("Polling audit log failed: \(error.localizedDescription)")
+        }
+    }
+
+    static func pollingInterval(onACPower: Bool) -> TimeInterval {
+        onACPower ? 30 : 300
+    }
+
+    private func automaticRefreshIfDue() async {
+        let info = IOPSCopyPowerSourcesInfo().takeRetainedValue()
+        let source = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String?
+        let interval = Self.pollingInterval(onACPower: source == kIOPSACPowerValue)
+        let powerSource = source ?? "unknown"
+        if lastObservedPowerSource != powerSource {
+            recordPollingEvent("power_source_changed", source: powerSource, interval: interval,
+                               extra: ["previousPowerSource": lastObservedPowerSource ?? "startup"])
+            lastObservedPowerSource = powerSource
+        }
+        let elapsed = lastAutomaticRefreshAt.map { Date().timeIntervalSince($0) }
+        // Timer delivery has subsecond jitter; don't defer a due poll by a
+        // whole additional tick because it arrived a few milliseconds early.
+        guard elapsed.map({ $0 >= interval - 0.5 }) ?? true else {
+            recordPollingEvent("waiting", source: powerSource, interval: interval,
+                               extra: ["elapsedSinceAttemptSeconds": elapsed ?? 0])
+            return
+        }
+        guard !isRefreshing, !isAuthenticating, !isInstallingCLI else {
+            recordPollingEvent("skipped_busy", source: powerSource, interval: interval)
+            return
+        }
+        lastAutomaticRefreshAt = Date()
+        let startedAt = Date()
+        let previousSync = lastSuccessfulSyncAt
+        recordPollingEvent("refresh_started", source: powerSource, interval: interval,
+                           extra: ["elapsedSinceAttemptSeconds": elapsed ?? 0])
+        await refresh()
+        var result: [String: Any] = ["durationSeconds": Date().timeIntervalSince(startedAt),
+                                     "succeeded": lastSuccessfulSyncAt != previousSync]
+        if let lastSuccessfulSyncAt {
+            result["lastSuccessfulSyncAt"] = ISO8601DateFormatter().string(from: lastSuccessfulSyncAt)
+        }
+        if let lastCLIErrorMessage { result["error"] = lastCLIErrorMessage }
+        recordPollingEvent("refresh_finished", source: powerSource, interval: interval, extra: result)
+        if lastSuccessfulSyncAt != previousSync {
+            await keepResetWindowsRolling()
+        }
+    }
+
+    private func keepResetWindowsRolling() async {
+        guard let snapshot, !isStartingResetWindow else { return }
+        rollingState.observe(snapshot, now: Date())
+        do { try rollingState.save() } catch { return }
+        let info = IOPSCopyPowerSourcesInfo().takeRetainedValue()
+        let power = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? ?? "unknown"
+        let keys = rollingState.dueOpportunities(snapshot, now: Date())
+        let reason = !preferences.keepsResetWindowsRolling ? "disabled"
+            : power != kIOPSACPowerValue ? "not_on_ac_power"
+            : keys.isEmpty ? "no_eligible_opportunity" : "eligible"
+        let dates = rollingState.boundaries.mapValues { ISO8601DateFormatter().string(from: $0) }
+        var decision: [String: Any] = ["reason": reason, "enabled": preferences.keepsResetWindowsRolling,
+                                      "opportunities": keys, "trackedResetTimes": dates,
+                                      "reservedCount": rollingState.attempted.count,
+                                      "snapshotUpdatedAt": ISO8601DateFormatter().string(from: snapshot.updatedAt)]
+        decision["fiveHourUsedPercent"] = snapshot.fiveHour?.usedPercent
+        decision["weeklyUsedPercent"] = snapshot.weekly?.usedPercent
+        if let reset = snapshot.fiveHour?.resetsAt { decision["observedFiveHourReset"] = ISO8601DateFormatter().string(from: reset) }
+        if let reset = snapshot.weekly?.resetsAt { decision["observedWeeklyReset"] = ISO8601DateFormatter().string(from: reset) }
+        if let attempt = rollingState.lastAttempt { decision["lastAttemptAt"] = ISO8601DateFormatter().string(from: attempt) }
+        recordPollingEvent("rollover_decision", source: power, interval: Self.pollingInterval(onACPower: power == kIOPSACPowerValue), extra: decision)
+        guard preferences.keepsResetWindowsRolling, power == kIOPSACPowerValue else { return }
+        guard !keys.isEmpty else { return }
+        // Reserve on disk before any potentially consuming work. A timeout or
+        // app restart must never cause a second send for the same opportunity.
+        rollingState.attempted.formUnion(keys)
+        rollingState.lastAttempt = Date()
+        do { try rollingState.save() } catch {
+            recordPollingEvent("rollover_reservation_failed", source: power, interval: 30)
+            return
+        }
+        isStartingResetWindow = true
+        defer { isStartingResetWindow = false }
+        let executionStartedAt = Date()
+        do {
+            let cli = try CodexCLI.resolve()
+            recordPollingEvent("rollover_model_probe_started", source: power, interval: 30, extra: ["opportunities": keys])
+            guard let model = try await cli.resetWindowModel() else {
+                recordPollingEvent("rollover_no_supported_model", source: "AC Power", interval: 30,
+                                   extra: ["opportunities": keys])
+                return
+            }
+            let latestPower = IOPSCopyPowerSourcesInfo().takeRetainedValue()
+            guard preferences.keepsResetWindowsRolling,
+                  IOPSGetProvidingPowerSourceType(latestPower)?.takeUnretainedValue() as String? == kIOPSACPowerValue else {
+                recordPollingEvent("rollover_cancelled_on_battery_or_disabled", source: "unknown", interval: 30)
+                // Nothing was sent, so the opportunity may be considered again.
+                rollingState.attempted.subtract(keys)
+                rollingState.lastAttempt = nil
+                try rollingState.save()
+                return
+            }
+            recordPollingEvent("rollover_started", source: "AC Power", interval: 30,
+                               extra: ["opportunities": keys, "model": model])
+            let turn = try await cli.startResetWindow(model: model)
+            recordPollingEvent("rollover_finished", source: "AC Power", interval: 30,
+                               extra: ["turnSucceeded": turn.succeeded, "exitStatus": turn.terminationStatus,
+                                       "durationSeconds": Date().timeIntervalSince(executionStartedAt), "resetConfirmed": false,
+                                       "opportunities": keys])
+        } catch {
+            recordPollingEvent("rollover_uncertain", source: "AC Power", interval: 30,
+                               extra: ["opportunities": keys, "retrySuppressed": true,
+                                       "errorCategory": String(describing: type(of: error)),
+                                       "durationSeconds": Date().timeIntervalSince(executionStartedAt)])
+        }
+        await refresh()
+        if let after = self.snapshot {
+            let confirmed = keys.filter { key in
+                let window = key.hasPrefix("5H:") ? after.fiveHour : after.weekly
+                guard let reset = window?.resetsAt, let old = rollingState.boundaries[key.hasPrefix("5H:") ? "5H" : "WEEK"] else { return false }
+                return reset > Date() && reset.timeIntervalSince(old) > 60 && (window?.usedPercent ?? 0) > 0
+            }
+            recordPollingEvent("rollover_verified", source: "AC Power", interval: 30,
+                               extra: ["confirmedOpportunities": confirmed, "opportunities": keys])
+        }
+    }
     /// Timestamp of the last explicit widget timeline reload. Background polls
     /// reuse it to skip a reload while the widget still shows a fresh reading.
     private var lastWidgetReloadAt: Date?
@@ -73,10 +279,12 @@ final class LimitViewModel: ObservableObject {
         widgetBridge.publish(WidgetPayload(snapshot: snapshot, preferences: preferences))
         configureLoginItem()
         configureSystemNotificationsIfNeeded()
-        Task { await refresh() }
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        Task { await automaticRefreshIfDue() }
+        // Recheck the power source every 30 seconds, without fetching data on
+        // battery until the five-minute interval has elapsed.
+        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self?.refresh()
+                await self?.automaticRefreshIfDue()
             }
         }
     }
@@ -444,11 +652,11 @@ final class LimitViewModel: ObservableObject {
             }
 
             var parts: [String] = []
-            if let fiveHour = snapshot.fiveHour {
-                parts.append("5H \(menuBarValue(for: fiveHour))")
-            }
             if let weekly = snapshot.weekly {
-                parts.append("7D \(menuBarValue(for: weekly))")
+                parts.append(menuBarValue(for: weekly))
+            }
+            if let fiveHour = snapshot.fiveHour {
+                parts.append("FH \(menuBarValue(for: fiveHour))")
             }
             return parts.isEmpty ? "Codex --" : parts.joined(separator: " ")
         case .percentOnly:
@@ -933,13 +1141,13 @@ private actor LowLimitNotificationManager {
     private func ledgerURL() -> URL {
         (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory)
-            .appendingPathComponent("CodexLimitWidget", isDirectory: true)
+            .appendingPathComponent("CodexLimitWidgetCustom", isDirectory: true)
             .appendingPathComponent("low-limit-notification-ledger.json")
     }
 }
 
 private final class LoopbackWidgetBridge: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.sergeylopukhov.codexlimitwidget.loopback")
+    private let queue = DispatchQueue(label: "com.calaborhoc.codexlimitwidgetcustom.loopback")
     private var listener: NWListener?
     private var responseData = Data()
 
@@ -948,7 +1156,7 @@ private final class LoopbackWidgetBridge: @unchecked Sendable {
 
         do {
             let parameters = NWParameters.tcp
-            parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: 38347)
+            parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: 38348)
             let listener = try NWListener(using: parameters)
             listener.newConnectionHandler = { [weak self] connection in
                 self?.serve(connection)

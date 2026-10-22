@@ -1,173 +1,162 @@
-# Codex Limit Widget
+# Maestro Limit
 
-<p align="center">
-  <a href="README.md"><strong>English</strong></a> · <a href="README.ru.md">Русский</a>
-</p>
+Maestro Limit is a macOS menu bar app and desktop widget for keeping Codex allowance, reset times, and data freshness visible. It reads your signed-in local Codex CLI, adapts polling to your Mac's power source, and can keep eligible reset windows rolling with a minimal request while plugged in.
 
-<div align="center">
-  <img src="assets/screenshots/readme/beige-large.jpg" width="520" alt="Codex Limit Widget large widget in Beige design">
+Built on [Codex Limit Widget](https://github.com/sergeylopukhov/codex-limit-widget). This fork is maintained at [Calabor-Hoc/codex-limit-widget](https://github.com/Calabor-Hoc/codex-limit-widget).
 
-  <p>
-    A macOS menu bar app and desktop widget for keeping Codex limits visible.
-  </p>
-
-  <p>
-    <a href="https://github.com/sergeylopukhov/codex-limit-widget/releases/latest"><img alt="Download latest release" src="https://img.shields.io/badge/download-latest_release-222222?style=for-the-badge"></a>
-    <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-777777?style=for-the-badge">
-    <img alt="WidgetKit" src="https://img.shields.io/badge/WidgetKit-enabled-6f8f5f?style=for-the-badge">
-  </p>
-</div>
-
-Codex Limit Widget puts your Codex limits in the macOS menu bar and on the desktop, so you can see how much is left without opening Codex. It shows whichever limit windows your account has: weekly-only accounts get just the weekly limit, with no empty 5-hour slot, and accounts that still have the 5-hour window get both. Reset times, your plan, and usage history are always one glance away.
-
-While the app is running, it refreshes the data once a minute and hands the latest snapshot to WidgetKit.
-
-## What It Shows
-
-- Every limit window your account has: weekly, plus 5-hour when Codex reports it.
-- When each limit resets.
-- Your Codex plan under a readable name, such as `Plus`, `Pro 5x`, or `Pro 20x`.
-- Usage stats: lifetime tokens, peak day, tokens used today, current streak, longest turn, and daily average.
-- A seven-day token chart in the large widget.
-- A compact percent or a detailed readout in the menu bar, with a meter that shifts from green to dark red as the limit runs down.
-- A note when the data is more than a few minutes old, and the time of the last successful sync.
-- One widget in Small, Medium, and Large sizes.
-- Dark and Beige designs, or System to follow the macOS appearance.
-- English or Russian interface, or the system language.
-- A notice and an `Update now` button when a new release is out.
-
-## Install
-
-1. Download the latest `.dmg` from [GitHub Releases](https://github.com/sergeylopukhov/codex-limit-widget/releases/latest).
-2. Open it and drag `Codex Limit Widget.app` to `Applications`.
-3. Launch the app.
-
-Once installed, the app updates itself (version 1.1.8 and later).
-
-Requirements:
+## Requirements and installation
 
 - macOS 14 or later.
-- Codex CLI. If it's missing or you're not signed in, the app offers to install it and start sign-in.
+- Xcode with Swift 6 support to build from source.
+- Codex CLI installed and signed in for usage readings and optional rollover requests.
 
-Codex in the ChatGPT desktop app doesn't replace the CLI here: the app reads limits through the local Codex CLI. With your confirmation, it can run the official CLI installer for you.
+Build the shared scheme from this repository:
 
-## Add The Widget
+```sh
+xcodebuild -project CodexLimitWidget.xcodeproj \
+  -scheme CodexLimitWidget -configuration Debug \
+  -derivedDataPath build/MaestroLimit \
+  CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES build
+```
 
-Open the macOS widget gallery, find `Codex Limit Widget`, and pick Small, Medium, or Large.
+The app is produced at `build/MaestroLimit/Build/Products/Debug/Maestro Limit.app`. Copy it to `/Applications/Maestro Limit.app` and launch it. Ad-hoc signing is for local use; distribution signing and notarization require your own Apple signing setup.
 
-The widget uses the design selected in the app's settings, and widgets already on the desktop switch as soon as you change it. When a window covers the desktop, macOS turns the widget into system glass in either design.
+Right-click the desktop, choose **Edit Widgets**, search for **Maestro Limit**, and add Small, Medium, or Large. After renaming an older Custom installation, remove its existing widgets and add the Maestro Limit widgets.
 
-## Menu Bar
+Maestro Limit has a separate bundle identifier, URL scheme, data directory, and local bridge port from the original app. The two apps can coexist. Its own internal identifiers and data directory remain stable across the product rename, preserving settings and history.
 
-The menu bar item shows either a compact percent or a detailed readout. In percent mode, a thin meter under the number fills with the remaining limit and shifts from green to dark red as it runs out. The digits can take the same color. Both are separate switches in Settings: the meter is colored by default, the digits aren't.
+Updates are installed locally from this fork. Automatic downloads and installation of upstream releases are disabled.
 
-<p align="center">
-  <img src="assets/screenshots/readme/percent-menu-bar.png" width="100%" alt="Menu bar percent indicator from 100% to 0% in dark and light menu bars">
-</p>
+## Menu bar
 
-Left-click and right-click each get their own action: the context menu, the popover, Settings, or Codex. The context menu refreshes limits, copies the current status, and quits the app.
+Detailed mode displays:
 
-The popover shows each limit window with a colored meter, reset times, and your plan, plus a `Copy status` button that copies the plan, percentage, and reset time of each window as plain text. When an update is ready, an arrow appears next to the menu bar value and the popover shows an update card.
+```text
+97% FH 82%
+```
 
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/readme/popover-window-beige.jpg" width="100%" alt="Menu bar popover in Beige design"><br>
-      <sub>Beige</sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/readme/popover-window-dark.jpg" width="100%" alt="Menu bar popover in Dark design"><br>
-      <sub>Dark</sub>
-    </td>
-  </tr>
-</table>
+The unlabeled percentage on the left is the weekly remainder. **FH** identifies the five-hour remainder on the right. A missing limit window is omitted. Existing credit-balance fallback behavior remains available for exhausted limits when Codex reports credits.
 
-A global keyboard shortcut, set in Settings, opens a larger window with both limits and your usage stats from any app. Press it again to close the window.
+Compact mode shows a single selected percentage with an optional colored meter and colored digits. Left-click and right-click actions can independently open the context menu, popover, settings, or Codex. The context menu supports manual refresh, copying status, and quitting.
 
-## Widgets
+The popover shows allowance meters, reset times, and account details. An optional global shortcut toggles the detailed limits window. The custom settings window supports **Command-W** to close.
 
-<table>
-  <tr>
-    <td width="40%" align="center">
-      <img src="assets/screenshots/readme/beige-large.jpg" width="100%" alt="Large Codex Limit Widget in Beige design"><br>
-      <sub>Large</sub>
-    </td>
-    <td width="38%" align="center">
-      <img src="assets/screenshots/readme/beige-medium.jpg" width="100%" alt="Medium Codex Limit Widget in Beige design"><br>
-      <sub>Medium</sub>
-    </td>
-    <td width="22%" align="center">
-      <img src="assets/screenshots/readme/beige-small.jpg" width="100%" alt="Small Codex Limit Widget in Beige design"><br>
-      <sub>Small</sub>
-    </td>
-  </tr>
-</table>
+## Desktop widgets
 
-<table>
-  <tr>
-    <td width="40%" align="center">
-      <img src="assets/screenshots/readme/dark-large.jpg" width="100%" alt="Large Codex Limit Widget in Dark design"><br>
-      <sub>Large</sub>
-    </td>
-    <td width="38%" align="center">
-      <img src="assets/screenshots/readme/dark-medium.jpg" width="100%" alt="Medium Codex Limit Widget in Dark design"><br>
-      <sub>Medium</sub>
-    </td>
-    <td width="22%" align="center">
-      <img src="assets/screenshots/readme/dark-small.jpg" width="100%" alt="Small Codex Limit Widget in Dark design"><br>
-      <sub>Small</sub>
-    </td>
-  </tr>
-</table>
+Small, Medium, and Large are available in Dark, Beige, or System appearance. The layouts prioritize allowance percentages and readable reset and sync information. Widget cards omit the app-name heading, the redundant Remaining caption, and Plan.
 
-A click on the widget opens the app, the detailed limits window, or Codex, whichever you choose in Settings. The line with the last sync time can be turned off there too.
+- **Small:** five-hour reset at the top, SYNCED directly below, a large primary percentage, then weekly reset above the weekly meter.
+- **Medium:** SYNCED aligned left and RESETS aligned right on the top row; a larger primary percentage and reset details fill the body. Weekly percentage appears with its meter rather than being repeated in the body.
+- **Large:** primary allowance, weekly meter and reset, streak, longest turn, daily average, lifetime tokens, daily totals, and a seven-day chart when usage history is available.
 
-## Settings
+Accounts without a five-hour window use the weekly window as the primary metric. Settings control reset information, last-sync visibility, appearance, language, and the action opened by a widget click. Last-sync visibility is enabled by default.
 
-Settings are organized into tabs:
+Reset times use the Mac's local time zone, **24-hour format**, and minute precision. Weekly resets include a weekday.
 
-- **General**: design (Dark, Beige, or System), language, and the keyboard shortcut for the detailed limits window.
-- **Menu bar**: show or hide the item, percent or detailed mode, colored meter and digits, which limit feeds the percent, and the left-click and right-click actions.
-- **Widgets**: the last sync time line and what a click on the widget opens.
-- **Notifications**: low-limit alerts with separate thresholds for each limit, and quiet hours.
-- **Updates**: installed version, result of the last check, and the update button.
-- **Diagnostics**: Codex CLI status, data source, last successful sync, the CLI response when a refresh fails, and `Reset data`.
+SYNCED expresses the age of the last successful reading:
 
-`Reset data` asks for confirmation, then deletes the stored limit snapshot, widget data, notification history, and app settings. Your Codex account and CLI sign-in stay untouched.
+| Age | Example |
+| --- | --- |
+| Under one hour | `0min ago`, `1min ago`, `59min ago` |
+| One through nine hours | `1h ago`, `1.5h ago`, `9h ago` |
+| More than nine hours | `stale` |
 
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/readme/settings-window-beige.jpg" width="100%" alt="Settings window in Beige design"><br>
-      <sub>Beige</sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="assets/screenshots/readme/settings-window-dark.jpg" width="100%" alt="Settings window in Dark design"><br>
-      <sub>Dark</sub>
-    </td>
-  </tr>
-</table>
+Hours are truncated to one decimal place. Freshness is based on the real successful sync timestamp, never on when a view happened to render.
 
-## Notifications
+## Power-aware polling and widget updates
 
-The 5-hour and weekly limits each have their own switch and thresholds, so you decide when each one warns you. Quiet hours silence low-limit alerts during the hours you pick; they don't affect the restored-limit message.
+While the app is running and the Mac is awake:
 
-You only get a restored-limit notification for a limit the app actually saw run out: it has to record the window at 100% used and still be running when the quota comes back. It also needs notification permission, which the app asks for once.
+| Power source | Data polling |
+| --- | --- |
+| AC power | Approximately every 30 seconds |
+| Battery, or unknown power state | Approximately every 5 minutes |
 
-## Updates
+The app checks power every 30 seconds. Connecting or disconnecting power takes effect on the next check. Polls do not overlap authentication, CLI installation, or another data refresh. A half-second tolerance handles timer jitter. Sleeping or quitting pauses execution; manual refresh remains available.
 
-The app checks the latest public GitHub release at launch and every four hours after that. You can also check manually in Settings.
+The menu bar follows the app's readings. Widget updates have a separate lifecycle:
 
-When a new version is out, the menu bar, the popover, and Settings all say so. Press `Update now` and the app downloads the official macOS ZIP, verifies its SHA-256 digest published by GitHub, bundle identifier, version, and code signature, replaces the copy in `Applications`, and relaunches. After the update, `What's New` lists what changed since the version you had.
+- Successful polls publish the latest payload to the local bridge.
+- Changed data requests a WidgetKit timeline reload; unchanged data requests one after 15 minutes.
+- Timeline entries advance relative sync age without sending extra CLI or LLM requests. A future timeline also lets old data age past nine hours if the app stops.
+- WidgetKit decides when reload requests and timeline entries are displayed. A 30-second app poll does **not** guarantee a 30-second desktop widget refresh.
 
-If the app can't write to `Applications`, use `Open release page` and install the DMG by hand.
+If a usage-statistics request fails, the previous statistics can be retained. Statistics older than six hours are treated as expired. Failed allowance polls preserve the last successful reading and its timestamp.
 
-## Privacy
+## Keep reset windows rolling
 
-Your Codex usage and limit data never leave your Mac. The app reads the local Codex CLI session and keeps a small snapshot for the widget. Update checks send only the installed version number to the public GitHub Releases API, never usage data. The project has no server of its own.
+**Keep reset windows rolling (AC only)** is a simple continuous scheduler in General settings. It is enabled by default in this personalized build and can be switched off at any time.
 
-## Uninstall
+For accounts where the next usage window starts on the first request after expiry, Maestro Limit can send a minimal Codex turn after the observed boundary. It uses the existing allowance polling instead of adding a second usage poller.
 
-Quit Codex Limit Widget and delete it from `Applications`.
+The scheduler:
 
-If the widget is still there afterwards, restart your Mac and remove any other copies of `Codex Limit Widget.app`.
+1. Tracks observed five-hour and weekly reset boundaries across restarts. It does not bootstrap an unknown, unused window.
+2. Waits until an eligible boundary has passed, plus a **60-second buffer**. It does not send early into the old window.
+3. Requires a recent successful reading, known weekly usage below 99%, available five-hour allowance when present, and AC power.
+4. Skips a window that fresh usage has already shown to be active.
+5. Reserves the opportunity on disk before attempting a request. Simultaneous due opportunities share one turn; attempts are at least one hour apart.
+6. Queries the installed Codex model catalog without starting a turn. It selects visible `gpt-6-luna`, otherwise `gpt-5.6-luna`; if neither is available, it sends nothing.
+7. Rechecks power and the enable switch immediately before sending. The isolated, ephemeral, read-only CLI turn asks only for “OK”, uses low reasoning, and ignores user config and project context.
+8. Rereads allowance after the attempt and logs whether a future reset and actual usage confirm a new window.
+
+Requests consume subscription allowance. This feature cannot create extra quota, bypass an exhausted limit, reset an active window, or force an earlier weekly reset. The provider controls window behavior; a successful turn alone is not confirmation that either reset moved.
+
+A request that may have been sent is not automatically retried, including after a timeout, process failure, or app restart. Unsupported-model and uncertain opportunities remain reserved. A corrupted reservation file fails closed. Switching to battery or disabling the feature before sending cancels that attempt; a request already sent cannot be undone. No new automatic turn begins on battery.
+
+The Mac must be awake, signed in, and running Maestro Limit. After waking, the scheduler evaluates the current state rather than replaying every missed window.
+
+The minimal scheduling approach is inspired by [UsageLoop](https://github.com/benthompsondev/usageloop). Maestro Limit does not include its weekly routines, daily schedules, or overnight scheduling UI.
+
+## Execution logs and diagnostics
+
+Runtime logs are persisted as daily JSONL files:
+
+```text
+~/Library/Application Support/CodexLimitWidgetCustom/polling-logs/polling-YYYY-MM-DD.jsonl
+```
+
+The stable directory name preserves earlier Custom-version logs. File dates and timestamps use UTC; convert them to local time when reviewing.
+
+Each record includes timestamp, process ID, app version, log schema, event name, power source, and polling interval. Relevant events include:
+
+- `power_source_changed`: previous and current power source.
+- `waiting`, `skipped_busy`, `refresh_started`, `refresh_finished`: measured interval since the previous attempt, request duration, success, last successful sync, and polling errors.
+- `rollover_decision`: enabled state, eligibility reason, observed and tracked resets, usage percentages, reservations, and previous attempt time.
+- `rollover_model_probe_started`, `rollover_no_supported_model`, `rollover_started`: capability checks and selected model.
+- `rollover_finished`, `rollover_uncertain`: exit status or error category, duration, and retry suppression.
+- `rollover_verified`: which reset opportunities were confirmed after the readback.
+- Reservation failures and cancellation because of power or settings changes.
+
+A daily review can distinguish actual refresh attempts from waiting, model-turn success from reset confirmation, and AC/battery behavior across app sessions. Sleep and app-exit gaps are not by themselves proof of a scheduler failure. Missing battery or transition samples mean that behavior still needs observation.
+
+Logs do not store credentials, prompts, model replies, or conversations. They remain local; raw logs are not included in Git. Logs currently have no automatic retention limit. The settings Diagnostics tab also exposes connection state, latest successful sync, refresh errors, and Reset data. The rollover reservation ledger remains separate so a data reset cannot accidentally resend an uncertain turn.
+
+## Local data and privacy
+
+Settings, allowance snapshots, widget payloads, notification history, rollover reservations, and audit logs are stored locally under:
+
+```text
+~/Library/Application Support/CodexLimitWidgetCustom/
+```
+
+The app and extension communicate through the dedicated loopback endpoint `127.0.0.1:38348`. Widget links use `codexlimitwidgetcustom://`; these internal names intentionally remain stable.
+
+Codex owns authentication and provider communication. Allowance reads use its local app-server. Optional rollover turns use the installed CLI and existing signed-in subscription, without requiring a separate API key. Maestro Limit does not upload usage or audit logs to a service of its own.
+
+## Development and verification
+
+```sh
+xcodebuild -project CodexLimitWidget.xcodeproj \
+  -scheme CodexLimitWidget -configuration Debug \
+  -derivedDataPath build/MaestroLimit \
+  CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES test
+```
+
+Tests cover existing snapshot/preferences behavior, remaining-level boundaries, relative-age formatting, power-specific polling intervals, rollover buffering and deduplication, active-window/exhaustion guards, and reservation serialization.
+
+Builds and synthetic tests do not replace observing real AC/battery transitions or a provider-confirmed reset rollover. Use the persisted logs to assess those after real usage. No rollover turn is sent merely to make a test pass.
+
+## Credits
+
+Maestro Limit is an independent fork of [sergeylopukhov/codex-limit-widget](https://github.com/sergeylopukhov/codex-limit-widget), with continuous-window scheduling informed by [benthompsondev/usageloop](https://github.com/benthompsondev/usageloop). It is not affiliated with or endorsed by OpenAI. Legacy upstream screenshots and translated documentation may depict the original app; this README describes Maestro Limit.

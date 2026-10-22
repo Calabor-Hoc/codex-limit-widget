@@ -51,19 +51,7 @@ struct TerminalLimitWidgetView: View {
                         fixedGap(5)
                         // The stale marker replaces the sync time, so the row does
                         // not change the layout of the small widget.
-                        if shouldShowStaleWarning(snapshot, preferences: preferences) {
-                            Text("STALE")
-                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(staleMarkerStyle)
-                                .lineLimit(1)
-                                .frame(width: contentWidth, alignment: .leading)
-                        } else if preferences.widgetShowsLastUpdated {
-                            Text("SYNCED \(LimitSyncTimeText.make(for: snapshot.updatedAt))")
-                                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(dimText)
-                                .lineLimit(1)
-                                .frame(width: contentWidth, alignment: .leading)
-                        }
+                        compactStatusLine(snapshot: snapshot, width: contentWidth)
                         compactBody(snapshot: snapshot, metric: metric, width: contentWidth)
                     case .systemLarge:
                         // A tight, fixed gap keeps the hero number close to the title,
@@ -97,7 +85,7 @@ struct TerminalLimitWidgetView: View {
     private var contentPadding: EdgeInsets {
         switch family {
         case .systemSmall:
-            return EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
+            return EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
         case .systemLarge:
             return EdgeInsets(top: 16, leading: 22, bottom: 16, trailing: 22)
         default:
@@ -117,44 +105,28 @@ struct TerminalLimitWidgetView: View {
     }
 
     private func header(metric: TerminalMetric?, compact: Bool) -> some View {
-        // Sizes match the colored header height so the rows below line up.
-        let titleSize: CGFloat = compact ? 13 : (family == .systemMedium ? 13 : 24)
-        let clockSize: CGFloat = compact ? 10 : (family == .systemMedium ? 12 : 15)
-        let syncSize: CGFloat = compact ? 8.5 : (family == .systemMedium ? 10 : 11)
-
-        return HStack(alignment: .firstTextBaseline) {
-            Text("CODEX LIMIT")
-                .font(.system(size: titleSize, weight: .bold, design: .monospaced))
-                .foregroundStyle(accent)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Spacer(minLength: 8)
-
-            VStack(alignment: .trailing, spacing: 1) {
+        return Group {
+            if compact {
                 if let metric, preferences.widgetShowsResetTimes {
-                    Group {
-                        if compact {
-                            Text(LocalizedStringKey(metric.id)) + Text(verbatim: " \(LimitResetClockText.make(for: metric.window.resetsAt))")
-                        } else {
-                            Text("resets at") + Text(verbatim: " \(LimitResetClockText.make(for: metric.window.resetsAt))")
-                        }
+                    Text(verbatim: "\(metric.id == "WEEKLY" ? "WEEK" : "5H") \(metric.window.resetWeekdayText(locale: locale))")
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if preferences.widgetShowsLastUpdated, let syncedAt = snapshot?.updatedAt {
+                        SyncAgeText(date: syncedAt)
                     }
-                        .font(.system(size: clockSize, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(dimText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
+                    Spacer(minLength: 0)
+                    if let metric, preferences.widgetShowsResetTimes {
+                        Text("RESETS \(LimitResetClockText.make(for: metric.window.resetsAt))")
+                    }
                 }
-
-                if !compact, preferences.widgetShowsLastUpdated, let syncedAt = snapshot?.updatedAt {
-                    Text("SYNCED \(LimitSyncTimeText.make(for: syncedAt))")
-                        .font(.system(size: syncSize, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(dimText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.65)
-                }
+                .font(.system(size: family == .systemMedium ? 17.5 : 18, weight: .semibold, design: .monospaced))
             }
         }
+        .foregroundStyle(dimText)
+        .lineLimit(1)
+        .minimumScaleFactor(0.9)
     }
 
     private func mediumBody(snapshot: LimitSnapshot, metric: TerminalMetric, width: CGFloat) -> some View {
@@ -162,36 +134,20 @@ struct TerminalLimitWidgetView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: -2) {
-                    heroPercent(metric.window.leftPercent, size: 54, minScale: 0.6, glowOpacity: 0.24, glowRadius: 5)
-
-                    Text(LocalizedStringKey(metric.remainingLabel))
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundStyle(dimText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
+                heroPercent(metric.window.leftPercent, size: 70, minScale: 0.8, glowOpacity: 0.24, glowRadius: 5)
                 .frame(width: leftWidth, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    statRow("PLAN", snapshot.planDisplayName, size: 12)
-                    statRow("LIMIT", metric.id, size: 12)
-                    if let secondary = secondaryMetric(excluding: metric.id) {
-                        statRow(
-                            secondary.id,
-                            "\(secondary.window.leftPercent)%",
-                            size: 12,
-                            valueColor: heroStyle(for: secondary.window.leftPercent)
-                        )
-                    } else {
-                        statRow("USED", "\(metric.window.usedPercent)%", size: 12)
+                    statRow("LIMIT", metric.id, size: 15)
+                    if let weekly = snapshot.weekly, preferences.widgetShowsResetTimes {
+                        terminalInfoStat("WEEK RESET", value: Text(verbatim: weekly.resetWeekdayText(locale: locale)))
                     }
                 }
                 .padding(.top, 2)
             }
             .frame(width: width, alignment: .leading)
 
-            fixedGap(2)
+            Spacer(minLength: 4)
             TerminalDivider(color: mutedAccent)
             fixedGap(2)
 
@@ -241,7 +197,7 @@ struct TerminalLimitWidgetView: View {
                 )
                 .frame(width: width)
             } else {
-                terminalMeterHeader(metric.remainingLabel, "\(metric.window.leftPercent)%", width: width)
+                terminalMeterHeader(metric.meterLabel, "\(metric.window.leftPercent)%", width: width)
                 fixedGap(3)
                 TerminalMeter(percent: metric.window.leftPercent, color: heroStyle(for: metric.window.leftPercent), emptyColor: meterEmpty, emptyStroke: meterEmptyStroke, blockCount: 24, height: 10, glow: meterGlowColor(for: metric.window.leftPercent))
                     .frame(width: width)
@@ -261,19 +217,18 @@ struct TerminalLimitWidgetView: View {
 
     private func compactBody(snapshot: LimitSnapshot, metric: TerminalMetric, width: CGFloat) -> some View {
         return VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: -6) {
-                heroPercent(metric.window.leftPercent, size: 52, minScale: 0.55, glowOpacity: 0.22, glowRadius: 4)
-
-                Text(LocalizedStringKey(metric.remainingLabel))
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    .foregroundStyle(dimText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
+            heroPercent(metric.window.leftPercent, size: 52, minScale: 0.85, glowOpacity: 0.22, glowRadius: 4)
 
             Spacer(minLength: 4)
 
             if preferences.widgetShowsWeekly, let weekly = snapshot.weekly, metric.id != "WEEKLY" {
+                if preferences.widgetShowsResetTimes {
+                    Text("WEEK \(weekly.resetWeekdayText(locale: locale))")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(dimText)
+                        .lineLimit(1)
+                    fixedGap(3)
+                }
                 terminalMeterHeader("WEEK", "\(weekly.leftPercent)%", width: width, size: 9.5)
                 fixedGap(3)
                 TerminalMeter(
@@ -299,21 +254,10 @@ struct TerminalLimitWidgetView: View {
         let messageWidth = max(104, width * 0.32)
         let leftWidth = max(112, width - messageWidth - 25)
         let metricColor = heroStyle(for: metric.window.leftPercent)
-        // The weekly reset stamp belongs to the stat column unless the hero
-        // percentage already is the weekly limit and the header carries it.
-        let showsWeeklyResetStamp = metric.id != "WEEKLY"
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: -6) {
-                    heroPercent(metric.window.leftPercent, size: 80, minScale: 0.55, glowOpacity: 0.24, glowRadius: 5)
-
-                    Text(LocalizedStringKey(metric.remainingLabel))
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
-                        .foregroundStyle(dimText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                }
+                heroPercent(metric.window.leftPercent, size: 80, minScale: 0.55, glowOpacity: 0.24, glowRadius: 5)
                 .frame(width: leftWidth, alignment: .leading)
                 .layoutPriority(1)
 
@@ -326,12 +270,7 @@ struct TerminalLimitWidgetView: View {
                     }
                     terminalInfoStat("STREAK", value: streakValue(usage?.currentStreakDays))
                     terminalInfoStat("MAX TURN", value: durationValue(usage?.longestRunningTurnSec))
-                    terminalInfoStat(
-                        showsWeeklyResetStamp ? "WEEK RESET" : "BEST STREAK",
-                        value: showsWeeklyResetStamp
-                            ? weeklyResetValue(snapshot, locale: locale)
-                            : streakValue(usage?.longestStreakDays)
-                    )
+                    terminalInfoStat("WEEK RESET", value: weeklyResetValue(snapshot, locale: locale))
                     terminalInfoStat("DAILY AVG", value: Text(verbatim: TokenCountText.make(usage?.sevenDayAverageTokens)))
                 }
                 .frame(width: messageWidth, alignment: .leading)
@@ -355,7 +294,7 @@ struct TerminalLimitWidgetView: View {
                 )
                 .frame(width: width)
             } else {
-                terminalMeterHeader(metric.remainingLabel, "\(metric.window.leftPercent)%", width: width, size: 10)
+                terminalMeterHeader(metric.meterLabel, "\(metric.window.leftPercent)%", width: width, size: 10)
                 fixedGap(3)
                 TerminalMeter(percent: metric.window.leftPercent, color: metricColor, emptyColor: meterEmpty, emptyStroke: meterEmptyStroke, blockCount: 24, height: 8, glow: meterGlowColor(for: metric.window.leftPercent))
                     .frame(width: width)
@@ -371,8 +310,6 @@ struct TerminalLimitWidgetView: View {
                 }
                 TerminalVerticalDivider(color: mutedAccent)
                 terminalStat("TOKENS", TokenCountText.make(usage?.lifetimeTokens), labelSize: 9.5, valueSize: 15)
-                TerminalVerticalDivider(color: mutedAccent)
-                terminalStat("PLAN", snapshot.planDisplayName, labelSize: 9.5, valueSize: 15, truncatesValue: true)
             }
             .fixedSize(horizontal: false, vertical: true)
 
@@ -521,6 +458,19 @@ struct TerminalLimitWidgetView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    private func compactStatusLine(snapshot: LimitSnapshot, width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if preferences.widgetShowsLastUpdated {
+                SyncAgeText(date: snapshot.updatedAt)
+                    .foregroundStyle(dimText)
+            }
+        }
+        .font(.system(size: 15, weight: .semibold, design: .monospaced))
+        .lineLimit(1)
+        .minimumScaleFactor(0.65)
+        .frame(width: width, alignment: .leading)
+    }
+
     private func secondaryMetric(excluding id: String) -> TerminalMetric? {
         guard let snapshot else { return nil }
 
@@ -600,8 +550,8 @@ private struct TerminalMetric {
     let title: String
     let window: LimitWindowSnapshot
 
-    var remainingLabel: String {
-        id == "5H" ? "5H REMAINING" : "WEEKLY REMAINING"
+    var meterLabel: String {
+        id == "5H" ? "5H LIMIT" : "WEEKLY LIMIT"
     }
 
 }

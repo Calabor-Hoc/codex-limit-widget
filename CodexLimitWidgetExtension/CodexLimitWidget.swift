@@ -8,7 +8,7 @@ struct CodexLimitWidget: Widget {
         StaticConfiguration(kind: kind, provider: CodexLimitProvider()) { entry in
             CodexLimitWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("Codex Limit Widget")
+        .configurationDisplayName("Maestro Limit")
         .description("Shows Codex limits using the selected design, including automatic system appearance.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .contentMarginsDisabled()

@@ -35,11 +35,10 @@ struct CodexLimitProvider: TimelineProvider {
             let snapshot = payload?.snapshot
             let preferences = payload?.preferences ?? .default
             let now = Date()
-            // Hold the same reading across four entries so the widget keeps a
-            // stable value between the app's conditional reloads.
-            let entries = (0..<4).map { step in
-                let offset = TimeInterval(step * 5 * 60)
-                let date = Calendar.current.date(byAdding: .minute, value: step * 5, to: now) ?? now.addingTimeInterval(offset)
+            // Advancing the display age never reads the CLI or claims a new sync.
+            // Keep aging the saved reading even when the app stops running.
+            let entries = (0...541).map { step in
+                let date = now.addingTimeInterval(TimeInterval(step * 60))
                 return CodexLimitEntry(date: date, snapshot: snapshot, preferences: preferences)
             }
             let next = Calendar.current.date(byAdding: .minute, value: 15, to: now) ?? now.addingTimeInterval(15 * 60)

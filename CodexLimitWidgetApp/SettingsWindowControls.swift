@@ -319,7 +319,7 @@ struct SettingsTitleBar: View {
                 }
             }
 
-            Text("Codex Limit Widget Settings")
+            Text("Maestro Limit Settings")
                 .font(palette.titleFont)
                 .foregroundStyle(palette.titleText)
                 .lineLimit(1)

@@ -78,7 +78,7 @@
 		A10200000000000000000005 /* LimitViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitViews.swift; sourceTree = "<group>"; };
 		A10200000000000000000006 /* CodexLimitWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLimitWidgetBundle.swift; sourceTree = "<group>"; };
 		A10200000000000000000007 /* CodexLimitWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexLimitWidget.swift; sourceTree = "<group>"; };
-		A10200000000000000000008 /* Codex Limit Widget.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Codex Limit Widget.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10200000000000000000008 /* Maestro Limit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Maestro Limit.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10200000000000000000009 /* CodexLimitWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CodexLimitWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10200000000000000000010 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10200000000000000000011 /* CodexLimitWidgetApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CodexLimitWidgetApp.entitlements; sourceTree = "<group>"; };
@@ -203,7 +203,7 @@
 		A10600000000000000000005 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A10200000000000000000008 /* Codex Limit Widget.app */,
+				A10200000000000000000008 /* Maestro Limit.app */,
 				A10200000000000000000009 /* CodexLimitWidgetExtension.appex */,
 				A10200000000000000000031 /* CodexLimitWidgetTests.xctest */,
 			);
@@ -240,7 +240,7 @@
 			);
 			name = CodexLimitWidget;
 			productName = CodexLimitWidget;
-			productReference = A10200000000000000000008 /* Codex Limit Widget.app */;
+			productReference = A10200000000000000000008 /* Maestro Limit.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A10800000000000000000002 /* CodexLimitWidgetExtension */ = {
@@ -555,8 +555,9 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sergeylopukhov.CodexLimitWidget;
-				PRODUCT_NAME = "Codex Limit Widget";
+				PRODUCT_BUNDLE_IDENTIFIER = com.calaborhoc.CodexLimitWidgetCustom;
+				PRODUCT_NAME = "Maestro Limit";
+				PRODUCT_MODULE_NAME = Codex_Limit_Widget;
 				REMOVE_STATIC_EXECUTABLES_FROM_EMBEDDED_BUNDLES = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -579,8 +580,9 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sergeylopukhov.CodexLimitWidget;
-				PRODUCT_NAME = "Codex Limit Widget";
+				PRODUCT_BUNDLE_IDENTIFIER = com.calaborhoc.CodexLimitWidgetCustom;
+				PRODUCT_NAME = "Maestro Limit";
+				PRODUCT_MODULE_NAME = Codex_Limit_Widget;
 				REMOVE_STATIC_EXECUTABLES_FROM_EMBEDDED_BUNDLES = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -602,7 +604,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sergeylopukhov.CodexLimitWidget.WidgetExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.calaborhoc.CodexLimitWidgetCustom.WidgetExtension;
 				PRODUCT_NAME = CodexLimitWidgetExtension;
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -625,7 +627,7 @@
 					"@executable_path/../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sergeylopukhov.CodexLimitWidget.WidgetExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.calaborhoc.CodexLimitWidgetCustom.WidgetExtension;
 				PRODUCT_NAME = CodexLimitWidgetExtension;
 				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -644,10 +646,10 @@
 					"@loader_path/../Frameworks",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sergeylopukhov.CodexLimitWidgetTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.calaborhoc.CodexLimitWidgetCustomTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Codex Limit Widget.app/Contents/MacOS/Codex Limit Widget";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Maestro Limit.app/Contents/MacOS/Maestro Limit";
 			};
 			name = Debug;
 		};
@@ -662,10 +664,10 @@
 					"@loader_path/../Frameworks",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.sergeylopukhov.CodexLimitWidgetTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.calaborhoc.CodexLimitWidgetCustomTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Codex Limit Widget.app/Contents/MacOS/Codex Limit Widget";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Maestro Limit.app/Contents/MacOS/Maestro Limit";
 			};
 			name = Release;
 		};

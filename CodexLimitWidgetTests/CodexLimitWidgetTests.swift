@@ -3,6 +3,57 @@ import XCTest
 @testable import Codex_Limit_Widget
 
 final class CodexLimitWidgetTests: XCTestCase {
+    func testRolloverWaitsForBoundaryAndBufferAndDoesNotDuplicate() {
+        let now = Date()
+        let end = now.addingTimeInterval(-61)
+        var sample = snapshot(updatedAt: now)
+        sample.fiveHour = LimitWindowSnapshot(label: "5H", usedPercent: 0, windowDurationMins: 300, resetsAt: now.addingTimeInterval(18000))
+        sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 20, windowDurationMins: 10080, resetsAt: now.addingTimeInterval(86400))
+        var state = ResetRollingState(boundaries: ["5H": end])
+        state.observe(sample, now: now)
+        let keys = state.dueOpportunities(sample, now: now)
+        XCTAssertEqual(keys.count, 1)
+        XCTAssertTrue(state.dueOpportunities(sample, now: end.addingTimeInterval(59)).isEmpty)
+        state.attempted.formUnion(keys)
+        XCTAssertTrue(state.dueOpportunities(sample, now: now).isEmpty)
+    }
+
+    func testRolloverDoesNotSendForAlreadyActiveWindowOrExhaustedWeeklyQuota() {
+        let now = Date()
+        var sample = snapshot(updatedAt: now)
+        sample.fiveHour = LimitWindowSnapshot(label: "5H", usedPercent: 1, windowDurationMins: 300, resetsAt: now.addingTimeInterval(18000))
+        sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 20, windowDurationMins: 10080, resetsAt: now.addingTimeInterval(86400))
+        var state = ResetRollingState(boundaries: ["5H": now.addingTimeInterval(-61)])
+        state.observe(sample, now: now)
+        XCTAssertTrue(state.dueOpportunities(sample, now: now).isEmpty)
+        state.boundaries["5H"] = now.addingTimeInterval(-61)
+        sample.weekly?.usedPercent = 99
+        XCTAssertTrue(state.dueOpportunities(sample, now: now).isEmpty)
+        sample.weekly?.usedPercent = 20
+        state.lastAttempt = now.addingTimeInterval(-120)
+        XCTAssertTrue(state.dueOpportunities(sample, now: now).isEmpty)
+    }
+
+    func testRolloverReservationSurvivesEncoding() throws {
+        var state = ResetRollingState(boundaries: ["WEEK": Date(timeIntervalSince1970: 100)])
+        state.attempted.insert("WEEK:1")
+        let decoded = try JSONDecoder().decode(ResetRollingState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(decoded.attempted, state.attempted)
+        XCTAssertEqual(decoded.boundaries, state.boundaries)
+    }
+
+    func testRolloverCombinesDueWindowsAndRejectsStaleEvidence() {
+        let now = Date()
+        let end = now.addingTimeInterval(-61)
+        var sample = snapshot(updatedAt: now)
+        sample.fiveHour = LimitWindowSnapshot(label: "5H", usedPercent: 0, windowDurationMins: 300, resetsAt: end)
+        sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 0, windowDurationMins: 10080, resetsAt: end)
+        var state = ResetRollingState()
+        state.observe(sample, now: now)
+        XCTAssertEqual(state.dueOpportunities(sample, now: now).count, 2)
+        sample.updatedAt = now.addingTimeInterval(-91)
+        XCTAssertTrue(state.dueOpportunities(sample, now: now).isEmpty)
+    }
     private func fixture(_ name: String) throws -> Data {
         let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: name, withExtension: "json"))
         return try Data(contentsOf: url)
@@ -94,6 +145,28 @@ final class CodexLimitWidgetTests: XCTestCase {
 
     func testResetClockWithoutDate() {
         XCTAssertEqual(LimitResetClockText.make(for: nil), "--")
+    }
+
+    func testWeeklyResetIncludesWeekdayAnd24HourMinuteTime() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let date = calendar.date(from: DateComponents(year: 2026, month: 9, day: 26, hour: 19, minute: 5))!
+        let window = LimitWindowSnapshot(label: "Weekly", usedPercent: 48, windowDurationMins: 10_080, resetsAt: date)
+        XCTAssertEqual(window.resetWeekdayText(locale: Locale(identifier: "en_US")), "Sat 19:05")
+    }
+
+    func testSyncAgeBoundaries() {
+        let date = Date(timeIntervalSince1970: 0)
+        for (seconds, expected) in [(0.0, "0min ago"), (60, "1min ago"), (120, "2min ago"),
+                                    (3599, "59min ago"), (3600, "1h ago"), (5400, "1.5h ago"),
+                                    (32400, "9h ago"), (32401, "stale"), (-60, "0min ago")] {
+            XCTAssertEqual(LimitSyncTimeText.make(for: date, now: date.addingTimeInterval(seconds)), expected)
+        }
+    }
+
+    @MainActor func testPowerAwarePollingIntervals() {
+        XCTAssertEqual(LimitViewModel.pollingInterval(onACPower: true), 30)
+        XCTAssertEqual(LimitViewModel.pollingInterval(onACPower: false), 300)
     }
 
     func testRateLimitsFixtureUsesCodexLimitsAndNormalizesWindows() throws {

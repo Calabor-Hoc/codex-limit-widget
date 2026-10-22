@@ -97,51 +97,13 @@ final class AppUpdateController: ObservableObject {
     }
 
     func start() {
-        guard !started else { return }
-        started = true
-
-        Task { await checkForUpdates() }
-        timer = Timer.scheduledTimer(withTimeInterval: 4 * 60 * 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.checkForUpdates()
-            }
-        }
+        // Custom builds are maintained locally.
     }
 
     func checkForUpdates() async {
-        guard phase != .downloading, phase != .installing, phase != .checking else { return }
-
-        let checkID = UUID()
-        activeCheckID = checkID
-        phase = .checking
-        errorMessage = nil
-
-        do {
-            let release = try await Self.fetchLatestReleaseWithTimeout(currentVersion: currentVersion)
-            guard activeCheckID == checkID else { return }
-
-            activeCheckID = nil
-            lastCheckedAt = Date()
-
-            if Self.isVersion(release.version, newerThan: currentVersion) {
-                availableRelease = release
-                phase = .available
-                notifyAboutAvailableUpdate(release)
-            } else {
-                availableRelease = nil
-                phase = .upToDate
-            }
-        } catch is CancellationError {
-            guard activeCheckID == checkID else { return }
-            activeCheckID = nil
-            phase = availableRelease == nil ? .idle : .available
-        } catch {
-            guard activeCheckID == checkID else { return }
-
-            activeCheckID = nil
-            phase = .failed
-            errorMessage = Self.message(for: error)
-        }
+        availableRelease = nil
+        errorMessage = "Custom builds are updated locally."
+        phase = .failed
     }
 
     func installAvailableUpdate() async {

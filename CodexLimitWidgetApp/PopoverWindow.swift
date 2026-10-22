@@ -223,9 +223,9 @@ final class StatusItemController: NSObject, ObservableObject, NSPopoverDelegate 
         button.action = #selector(handleStatusItemClick)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.toolTip = updateController.availableRelease.map {
-            "Codex Limit Widget — version \($0.version) available"
-        } ?? "Codex Limit Widget"
-        button.setAccessibilityLabel("Codex Limit Widget")
+            "Maestro Limit — version \($0.version) available"
+        } ?? "Maestro Limit"
+        button.setAccessibilityLabel("Maestro Limit")
         button.setAccessibilityValue(
             updateController.isUpdateAvailable
                 ? "\(viewModel.menuBarTitle), update available"

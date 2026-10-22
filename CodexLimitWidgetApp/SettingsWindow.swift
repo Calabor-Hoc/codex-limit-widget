@@ -8,6 +8,15 @@ import Carbon.HIToolbox
 final class CustomSettingsWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            close()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 @MainActor
@@ -42,7 +51,7 @@ final class SettingsWindowPresenter: NSObject, ObservableObject, NSWindowDelegat
             backing: .buffered,
             defer: false
         )
-        window.title = "Codex Limit Widget Settings"
+        window.title = "Maestro Limit Settings"
         window.delegate = self
         window.contentViewController = NSHostingController(rootView: contentView)
         window.minSize = NSSize(width: 820, height: 480)
@@ -265,6 +274,11 @@ struct AppSettingsView: View {
     private func generalSection(palette: SettingsWindowPalette) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             SettingsSectionTitle("Application", palette: palette)
+
+            SettingsRow("Keep reset windows rolling (AC only)", palette: palette) {
+                SettingsSwitch(isOn: binding(\.keepsResetWindowsRolling), palette: palette)
+            }
+            SettingsNote("After a reset, sends one minimal Codex request while on AC power. Uses subscription allowance. Weekly timing remains controlled by Codex. Uncertain sends are not retried.", palette: palette)
 
             SettingsRow("Window design", palette: palette) {
                 SettingsSegmentedControl(

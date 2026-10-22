@@ -78,6 +78,52 @@ struct CodexCLI: Sendable, Equatable {
         }
         return result.combinedOutput
     }
+
+    /// One isolated, ephemeral turn; no project context, user-configured MCPs,
+    /// hooks, or fallback model. Failure is deliberately not retried here.
+    func resetWindowModel() async throws -> String? {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = ["app-server", "--stdio"]
+        process.environment = environment
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let reader = JSONLineReader(fileHandle: output.fileHandleForReading)
+        defer { reader.close(); TimedProcess.stop(process) }
+        func send(_ request: JSONRPCRequest) throws {
+            var data = try JSONEncoder().encode(request)
+            data.append(0x0A)
+            try input.fileHandleForWriting.write(contentsOf: data)
+        }
+        try send(.initialize)
+        _ = try await reader.response(id: 1, timeout: 5)
+        try send(.initialized)
+        try send(.modelsRead)
+        let data = try await reader.response(id: 4, timeout: 15)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let result = object?["result"] as? [String: Any]
+        let models = result?["data"] as? [[String: Any]] ?? []
+        return ["gpt-6-luna", "gpt-5.6-luna"].first { candidate in
+            models.contains { $0["model"] as? String == candidate && ($0["hidden"] as? Bool != true) }
+        }
+    }
+
+    func startResetWindow(model: String) async throws -> CodexCLICommandResult {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("maestro-reset-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let result = try await run(arguments: [
+            "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check",
+            "--sandbox", "read-only", "--cd", directory.path,
+            "--model", model, "-c", "model_reasoning_effort=\"low\"",
+            "-c", "model_provider=\"openai\"",
+            "Reply with exactly OK. Do not call tools, read files, or perform any other task."
+        ])
+        return result
+    }
 }
 
 enum CodexCLIAuthenticationStatus: Equatable, Sendable {
@@ -555,6 +601,7 @@ private struct JSONRPCErrorDTO: Decodable {
 }
 
 private enum JSONRPCRequest: Encodable {
+    case modelsRead
     case initialize
     case initialized
     case rateLimitsRead
@@ -565,6 +612,10 @@ private enum JSONRPCRequest: Encodable {
         try container.encode("2.0", forKey: .jsonrpc)
 
         switch self {
+        case .modelsRead:
+            try container.encode(4, forKey: .id)
+            try container.encode("model/list", forKey: .method)
+            try container.encode(["limit": 100], forKey: .params)
         case .initialize:
             try container.encode(1, forKey: .id)
             try container.encode("initialize", forKey: .method)

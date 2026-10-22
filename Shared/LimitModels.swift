@@ -1,12 +1,12 @@
 import Foundation
 import os
 
-let widgetKindIdentifier = "Codex Limit Widget"
+let widgetKindIdentifier = "Codex Limit Widget Custom"
 
 /// Shared loggers for the app and the widget extension. Write failures used to
 /// be swallowed by `try?`; these make them visible in Console.
 enum LimitLog {
-    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.sergeylopukhov.CodexLimitWidget"
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "com.calaborhoc.CodexLimitWidgetCustom"
 
     static let store = Logger(subsystem: subsystem, category: "store")
     static let cli = Logger(subsystem: subsystem, category: "cli")
@@ -358,10 +358,11 @@ enum LowLimitAlertWindow: String, Codable, CaseIterable, Identifiable {
 }
 
 struct LimitPreferences: Codable, Equatable {
+    var keepsResetWindowsRolling = true
     var widgetShowsFiveHour = true
     var widgetShowsWeekly = true
     var widgetShowsResetTimes = true
-    var widgetShowsLastUpdated = false
+    var widgetShowsLastUpdated = true
     var widgetShowsStaleWarning = true
     var showsMenuBarItem = true
     var menuBarMode = MenuBarMode.detailed
@@ -393,6 +394,7 @@ struct LimitPreferences: Codable, Equatable {
     static let `default` = LimitPreferences()
 
     enum CodingKeys: String, CodingKey {
+        case keepsResetWindowsRolling
         case widgetShowsFiveHour
         case widgetShowsWeekly
         case widgetShowsResetTimes
@@ -437,10 +439,11 @@ struct LimitPreferences: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        keepsResetWindowsRolling = try container.decodeIfPresent(Bool.self, forKey: .keepsResetWindowsRolling) ?? true
         widgetShowsFiveHour = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsFiveHour) ?? true
         widgetShowsWeekly = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsWeekly) ?? true
         widgetShowsResetTimes = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsResetTimes) ?? true
-        widgetShowsLastUpdated = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsLastUpdated) ?? false
+        widgetShowsLastUpdated = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsLastUpdated) ?? true
         widgetShowsStaleWarning = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsStaleWarning) ?? true
         showsMenuBarItem = try container.decodeIfPresent(Bool.self, forKey: .showsMenuBarItem) ?? true
         menuBarMode = (try? container.decodeIfPresent(MenuBarMode.self, forKey: .menuBarMode)) ?? .detailed
@@ -490,6 +493,7 @@ struct LimitPreferences: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(keepsResetWindowsRolling, forKey: .keepsResetWindowsRolling)
         try container.encode(widgetShowsFiveHour, forKey: .widgetShowsFiveHour)
         try container.encode(widgetShowsWeekly, forKey: .widgetShowsWeekly)
         try container.encode(widgetShowsResetTimes, forKey: .widgetShowsResetTimes)
@@ -821,7 +825,7 @@ enum LimitStore {
         if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             return [
                 support
-                    .appendingPathComponent("CodexLimitWidget", isDirectory: true)
+                    .appendingPathComponent("CodexLimitWidgetCustom", isDirectory: true)
                     .appendingPathComponent(filename)
             ]
         }
@@ -935,13 +939,13 @@ enum WidgetPayloadStore {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         return support
-            .appendingPathComponent("CodexLimitWidget", isDirectory: true)
+            .appendingPathComponent("CodexLimitWidgetCustom", isDirectory: true)
             .appendingPathComponent(filename)
     }
 }
 
 enum WidgetBridgeClient {
-    static let url = URL(string: "http://127.0.0.1:38347/v1/widget-payload")!
+    static let url = URL(string: "http://127.0.0.1:38348/v1/widget-payload")!
 
     static func fetch() async -> WidgetPayload? {
         var request = URLRequest(url: url)

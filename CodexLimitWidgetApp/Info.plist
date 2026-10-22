@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Codex Limit Widget</string>
+	<string>Maestro Limit</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon.icns</string>
 	<key>CFBundleName</key>
-	<string>Codex Limit Widget</string>
+	<string>Maestro Limit</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -26,12 +26,12 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.sergeylopukhov.codexlimitwidget</string>
+			<string>com.calaborhoc.codexlimitwidgetcustom</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>codexlimitwidget</string>
+				<string>codexlimitwidgetcustom</string>
 			</array>
 		</dict>
 	</array>

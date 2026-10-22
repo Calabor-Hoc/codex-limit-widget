@@ -63,10 +63,33 @@ enum LimitRemainingLevel {
 /// Formats the time of the last successful sync for the widget and the popover.
 enum LimitSyncTimeText {
     static func make(for date: Date, now: Date = Date()) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "MMM d, HH:mm"
-        return formatter.string(from: date)
+        let age = max(0, now.timeIntervalSince(date))
+        if age > 9 * 3600 { return "stale" }
+        if age < 3600 { return "\(Int(age / 60))min ago" }
+        let hours = floor(age / 360) / 10
+        return hours == floor(hours)
+            ? "\(Int(hours))h ago"
+            : String(format: "%.1fh ago", locale: Locale(identifier: "en_US_POSIX"), hours)
+    }
+}
+
+private struct SyncReferenceDateKey: EnvironmentKey {
+    static var defaultValue: Date { Date() }
+}
+
+extension EnvironmentValues {
+    var syncReferenceDate: Date {
+        get { self[SyncReferenceDateKey.self] }
+        set { self[SyncReferenceDateKey.self] = newValue }
+    }
+}
+
+struct SyncAgeText: View {
+    let date: Date
+    @Environment(\.syncReferenceDate) private var referenceDate
+
+    var body: some View {
+        Text(verbatim: "SYNCED \(LimitSyncTimeText.make(for: date, now: referenceDate))")
     }
 }
 
