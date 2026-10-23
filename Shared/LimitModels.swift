@@ -357,8 +357,31 @@ enum LowLimitAlertWindow: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+/// A one-time target. Durations are elapsed hours, even across daylight saving.
+struct ResetTargetSchedule {
+    let target: Date
+    static func validatedTarget(_ draft: Date, now: Date) -> Date? {
+        let rounded = Date(timeIntervalSince1970: floor(draft.timeIntervalSince1970 / 60) * 60)
+        return rounded.timeIntervalSince(now) >= 5 * 3600 ? rounded : nil
+    }
+    var pauseAt: Date { target.addingTimeInterval(-10 * 3600) }
+    var startAt: Date { target.addingTimeInterval(-5 * 3600) }
+
+    func phase(at now: Date) -> String {
+        if now < pauseAt { return "continuous_before_pause" }
+        if now < startAt { return "holding_for_target" }
+        if now < target { return "target_start_due" }
+        return "target_elapsed"
+    }
+
+    func allowsRolling(at now: Date) -> Bool {
+        now < pauseAt || now >= startAt
+    }
+}
+
 struct LimitPreferences: Codable, Equatable {
     var keepsResetWindowsRolling = true
+    var nextFiveHourResetTarget: Date?
     var widgetShowsFiveHour = true
     var widgetShowsWeekly = true
     var widgetShowsResetTimes = true
@@ -395,6 +418,7 @@ struct LimitPreferences: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case keepsResetWindowsRolling
+        case nextFiveHourResetTarget
         case widgetShowsFiveHour
         case widgetShowsWeekly
         case widgetShowsResetTimes
@@ -440,6 +464,7 @@ struct LimitPreferences: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         keepsResetWindowsRolling = try container.decodeIfPresent(Bool.self, forKey: .keepsResetWindowsRolling) ?? true
+        nextFiveHourResetTarget = try container.decodeIfPresent(Date.self, forKey: .nextFiveHourResetTarget)
         widgetShowsFiveHour = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsFiveHour) ?? true
         widgetShowsWeekly = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsWeekly) ?? true
         widgetShowsResetTimes = try container.decodeIfPresent(Bool.self, forKey: .widgetShowsResetTimes) ?? true
@@ -494,6 +519,7 @@ struct LimitPreferences: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(keepsResetWindowsRolling, forKey: .keepsResetWindowsRolling)
+        try container.encodeIfPresent(nextFiveHourResetTarget, forKey: .nextFiveHourResetTarget)
         try container.encode(widgetShowsFiveHour, forKey: .widgetShowsFiveHour)
         try container.encode(widgetShowsWeekly, forKey: .widgetShowsWeekly)
         try container.encode(widgetShowsResetTimes, forKey: .widgetShowsResetTimes)

@@ -37,10 +37,10 @@ struct CodexLimitProvider: TimelineProvider {
             let now = Date()
             // Advancing the display age never reads the CLI or claims a new sync.
             // Keep aging the saved reading even when the app stops running.
-            let entries = (0...541).map { step in
-                let date = now.addingTimeInterval(TimeInterval(step * 60))
+            let entries = LimitSyncTimeText.timelineDates(syncedAt: snapshot?.updatedAt, now: now).map { date in
                 return CodexLimitEntry(date: date, snapshot: snapshot, preferences: preferences)
             }
+            LimitLog.widget.info("Timeline generated: \(entries.count) age transitions")
             let next = Calendar.current.date(byAdding: .minute, value: 15, to: now) ?? now.addingTimeInterval(15 * 60)
             completionBox.completion(Timeline(entries: entries, policy: .after(next)))
         }

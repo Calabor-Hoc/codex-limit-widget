@@ -64,8 +64,15 @@ struct ResetRollingState: Codable {
         }
     }
 
-    func dueOpportunities(_ snapshot: LimitSnapshot, now: Date) -> [String] {
-        guard now.timeIntervalSince(snapshot.updatedAt) < 90,
+    func dueOpportunities(_ snapshot: LimitSnapshot, now: Date, target: Date? = nil) -> [String] {
+        if let target {
+            let schedule = ResetTargetSchedule(target: target)
+            guard schedule.allowsRolling(at: now) else { return [] }
+            if schedule.phase(at: now) == "target_start_due",
+               (snapshot.fiveHour?.usedPercent ?? 0) > 0,
+               (snapshot.fiveHour?.resetsAt ?? .distantPast) > now { return [] }
+        }
+        guard (0..<90).contains(now.timeIntervalSince(snapshot.updatedAt)),
               let weekly = snapshot.weekly, weekly.usedPercent < 99,
               (snapshot.fiveHour?.usedPercent ?? 0) < 100,
               lastAttempt.map({ now.timeIntervalSince($0) >= 3600 }) ?? true else { return [] }
@@ -177,13 +184,24 @@ final class LimitViewModel: ObservableObject {
 
     private func keepResetWindowsRolling() async {
         guard let snapshot, !isStartingResetWindow else { return }
-        rollingState.observe(snapshot, now: Date())
-        do { try rollingState.save() } catch { return }
+        let now = Date()
+        rollingState.observe(snapshot, now: now)
+        do { try rollingState.save() } catch {
+            recordPollingEvent("rollover_state_save_failed", source: "unknown", interval: 30)
+            return
+        }
+        let schedule = preferences.nextFiveHourResetTarget.map { ResetTargetSchedule(target: $0) }
+        let holding = schedule.map { !$0.allowsRolling(at: now) } ?? false
+        let activeAtScheduledStart = schedule?.phase(at: now) == "target_start_due"
+            && (snapshot.fiveHour?.usedPercent ?? 0) > 0
+            && (snapshot.fiveHour?.resetsAt ?? .distantPast) > now
         let info = IOPSCopyPowerSourcesInfo().takeRetainedValue()
         let power = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? ?? "unknown"
-        let keys = rollingState.dueOpportunities(snapshot, now: Date())
+        let keys = rollingState.dueOpportunities(snapshot, now: now, target: schedule?.target)
         let reason = !preferences.keepsResetWindowsRolling ? "disabled"
             : power != kIOPSACPowerValue ? "not_on_ac_power"
+            : holding ? "holding_for_target"
+            : activeAtScheduledStart ? "five_hour_window_already_active"
             : keys.isEmpty ? "no_eligible_opportunity" : "eligible"
         let dates = rollingState.boundaries.mapValues { ISO8601DateFormatter().string(from: $0) }
         var decision: [String: Any] = ["reason": reason, "enabled": preferences.keepsResetWindowsRolling,
@@ -195,20 +213,24 @@ final class LimitViewModel: ObservableObject {
         if let reset = snapshot.fiveHour?.resetsAt { decision["observedFiveHourReset"] = ISO8601DateFormatter().string(from: reset) }
         if let reset = snapshot.weekly?.resetsAt { decision["observedWeeklyReset"] = ISO8601DateFormatter().string(from: reset) }
         if let attempt = rollingState.lastAttempt { decision["lastAttemptAt"] = ISO8601DateFormatter().string(from: attempt) }
+        if let schedule {
+            decision["scheduleTarget"] = ISO8601DateFormatter().string(from: schedule.target)
+            decision["schedulePauseAt"] = ISO8601DateFormatter().string(from: schedule.pauseAt)
+            decision["scheduleStartAt"] = ISO8601DateFormatter().string(from: schedule.startAt)
+            decision["schedulePhase"] = schedule.phase(at: now)
+            decision["secondsPastScheduledStart"] = max(0, now.timeIntervalSince(schedule.startAt))
+            if let reset = snapshot.fiveHour?.resetsAt {
+                decision["observedResetOffsetFromTargetSeconds"] = reset.timeIntervalSince(schedule.target)
+            }
+        }
         recordPollingEvent("rollover_decision", source: power, interval: Self.pollingInterval(onACPower: power == kIOPSACPowerValue), extra: decision)
         guard preferences.keepsResetWindowsRolling, power == kIOPSACPowerValue else { return }
+        guard !holding, !activeAtScheduledStart else { return }
         guard !keys.isEmpty else { return }
-        // Reserve on disk before any potentially consuming work. A timeout or
-        // app restart must never cause a second send for the same opportunity.
-        rollingState.attempted.formUnion(keys)
-        rollingState.lastAttempt = Date()
-        do { try rollingState.save() } catch {
-            recordPollingEvent("rollover_reservation_failed", source: power, interval: 30)
-            return
-        }
         isStartingResetWindow = true
         defer { isStartingResetWindow = false }
         let executionStartedAt = Date()
+        var sendAttempted = false
         do {
             let cli = try CodexCLI.resolve()
             recordPollingEvent("rollover_model_probe_started", source: power, interval: 30, extra: ["opportunities": keys])
@@ -219,27 +241,47 @@ final class LimitViewModel: ObservableObject {
             }
             let latestPower = IOPSCopyPowerSourcesInfo().takeRetainedValue()
             guard preferences.keepsResetWindowsRolling,
+                  preferences.nextFiveHourResetTarget == schedule?.target,
+                  schedule?.allowsRolling(at: Date()) ?? true,
                   IOPSGetProvidingPowerSourceType(latestPower)?.takeUnretainedValue() as String? == kIOPSACPowerValue else {
-                recordPollingEvent("rollover_cancelled_on_battery_or_disabled", source: "unknown", interval: 30)
-                // Nothing was sent, so the opportunity may be considered again.
-                rollingState.attempted.subtract(keys)
-                rollingState.lastAttempt = nil
-                try rollingState.save()
+                recordPollingEvent("rollover_cancelled_before_send", source: "unknown", interval: 30,
+                                   extra: ["reason": "power_enable_or_schedule_changed"])
                 return
             }
+            // The read-only model probe can take time. Revalidate fresh usage,
+            // then persist a reservation only when a send is actually possible.
+            let sendTime = Date()
+            guard let latest = self.snapshot else { return }
+            rollingState.observe(latest, now: sendTime)
+            let currentKeys = rollingState.dueOpportunities(latest, now: sendTime, target: schedule?.target)
+            guard keys.allSatisfy(currentKeys.contains) else {
+                recordPollingEvent("rollover_cancelled_before_send", source: "AC Power", interval: 30,
+                                   extra: ["reason": "usage_changed_or_stale"])
+                return
+            }
+            var reserved = rollingState
+            reserved.attempted.formUnion(keys)
+            reserved.lastAttempt = sendTime
+            do { try reserved.save() } catch {
+                recordPollingEvent("rollover_reservation_failed", source: "AC Power", interval: 30)
+                return
+            }
+            rollingState = reserved
             recordPollingEvent("rollover_started", source: "AC Power", interval: 30,
                                extra: ["opportunities": keys, "model": model])
+            sendAttempted = true
             let turn = try await cli.startResetWindow(model: model)
             recordPollingEvent("rollover_finished", source: "AC Power", interval: 30,
                                extra: ["turnSucceeded": turn.succeeded, "exitStatus": turn.terminationStatus,
                                        "durationSeconds": Date().timeIntervalSince(executionStartedAt), "resetConfirmed": false,
                                        "opportunities": keys])
         } catch {
-            recordPollingEvent("rollover_uncertain", source: "AC Power", interval: 30,
-                               extra: ["opportunities": keys, "retrySuppressed": true,
+            recordPollingEvent(sendAttempted ? "rollover_uncertain" : "rollover_probe_failed", source: "AC Power", interval: 30,
+                               extra: ["opportunities": keys, "retrySuppressed": sendAttempted,
                                        "errorCategory": String(describing: type(of: error)),
                                        "durationSeconds": Date().timeIntervalSince(executionStartedAt)])
         }
+        guard sendAttempted else { return }
         await refresh()
         if let after = self.snapshot {
             let confirmed = keys.filter { key in
@@ -498,16 +540,27 @@ final class LimitViewModel: ObservableObject {
         }
     }
 
-    func updatePreferences(_ update: (inout LimitPreferences) -> Void) {
+    @discardableResult
+    func updatePreferences(_ update: (inout LimitPreferences) -> Void) -> Bool {
         var next = preferences
         update(&next)
-        preferences = next
+        let scheduleChanged = next.nextFiveHourResetTarget != preferences.nextFiveHourResetTarget
+        let rollingChanged = next.keepsResetWindowsRolling != preferences.keepsResetWindowsRolling
         do {
             try LimitPreferencesStore.write(next)
+            preferences = next
+            if scheduleChanged || rollingChanged {
+                recordPollingEvent("rollover_settings_changed", source: lastObservedPowerSource ?? "unknown", interval: 30,
+                                   extra: ["enabled": next.keepsResetWindowsRolling,
+                                           "scheduleTarget": next.nextFiveHourResetTarget.map { ISO8601DateFormatter().string(from: $0) } ?? "none"])
+            }
         } catch {
             LimitLog.store.error("LimitPreferencesStore.write failed: \(error.localizedDescription)")
+            recordPollingEvent("preferences_save_failed", source: lastObservedPowerSource ?? "unknown", interval: 30)
+            return false
         }
         reloadWidgets()
+        return true
     }
 
     // MARK: - Low limit alerts, per window

@@ -62,6 +62,15 @@ enum LimitRemainingLevel {
 
 /// Formats the time of the last successful sync for the widget and the popover.
 enum LimitSyncTimeText {
+    /// Only archive a new widget view when its age label actually changes.
+    /// 542 per-minute views exceeded WidgetKit's archive limit for Medium.
+    static func timelineDates(syncedAt: Date?, now: Date) -> [Date] {
+        guard let syncedAt else { return [now] }
+        let offsets = (1..<60).map { Double($0 * 60) }
+            + (10...90).map { Double($0 * 360) } + [32401]
+        return [now] + offsets.map { syncedAt.addingTimeInterval($0) }.filter { $0 > now }
+    }
+
     static func make(for date: Date, now: Date = Date()) -> String {
         let age = max(0, now.timeIntervalSince(date))
         if age > 9 * 3600 { return "stale" }

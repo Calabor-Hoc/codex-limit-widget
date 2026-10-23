@@ -3,6 +3,70 @@ import XCTest
 @testable import Codex_Limit_Widget
 
 final class CodexLimitWidgetTests: XCTestCase {
+    func testTargetValidationRoundsBeforeCheckingLeadTime() {
+        let now = Date(timeIntervalSince1970: 125)
+        XCTAssertNil(ResetTargetSchedule.validatedTarget(now.addingTimeInterval(18000), now: now))
+        XCTAssertEqual(ResetTargetSchedule.validatedTarget(now.addingTimeInterval(18060), now: now),
+                       Date(timeIntervalSince1970: 18180))
+        XCTAssertNil(ResetTargetSchedule.validatedTarget(now, now: now))
+    }
+
+    func testFutureDatedUsageCannotAuthorizeRolling() {
+        let now = Date()
+        var sample = snapshot(updatedAt: now.addingTimeInterval(1))
+        sample.fiveHour = LimitWindowSnapshot(label: "5H", usedPercent: 0, windowDurationMins: 300, resetsAt: now.addingTimeInterval(-61))
+        sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 20, windowDurationMins: 10080, resetsAt: now.addingTimeInterval(86400))
+        let state = ResetRollingState(boundaries: ["5H": now.addingTimeInterval(-61)])
+        XCTAssertTrue(state.dueOpportunities(sample, now: now).isEmpty)
+        sample.updatedAt = now
+        XCTAssertEqual(state.dueOpportunities(sample, now: now).count, 1)
+    }
+
+    func testSyncTimelineCoversEveryLabelChangeWithoutRedundantViews() {
+        let sync = Date(timeIntervalSince1970: 0)
+        let dates = LimitSyncTimeText.timelineDates(syncedAt: sync, now: sync)
+        XCTAssertEqual(dates.count, 142)
+        var entry = 0
+        for second in 0...32402 {
+            let now = sync.addingTimeInterval(Double(second))
+            while entry + 1 < dates.count && dates[entry + 1] <= now { entry += 1 }
+            XCTAssertEqual(LimitSyncTimeText.make(for: sync, now: dates[entry]),
+                           LimitSyncTimeText.make(for: sync, now: now))
+        }
+        let old = sync.addingTimeInterval(40000)
+        XCTAssertEqual(LimitSyncTimeText.timelineDates(syncedAt: sync, now: old), [old])
+        XCTAssertEqual(LimitSyncTimeText.timelineDates(syncedAt: nil, now: sync), [sync])
+        let midMinute = sync.addingTimeInterval(125)
+        let partial = LimitSyncTimeText.timelineDates(syncedAt: sync, now: midMinute)
+        XCTAssertEqual(partial[0], midMinute)
+        XCTAssertEqual(partial[1], sync.addingTimeInterval(180))
+    }
+
+    func testNextResetScheduleHoldsOvernightAndCatchesUpOnceAwake() throws {
+        let formatter = ISO8601DateFormatter()
+        let target = try XCTUnwrap(formatter.date(from: "2026-10-23T11:00:00+08:00"))
+        let schedule = ResetTargetSchedule(target: target)
+        for (stamp, allowed, phase) in [
+            ("2026-10-22T23:30:00+08:00", true, "continuous_before_pause"),
+            ("2026-10-23T00:59:59+08:00", true, "continuous_before_pause"),
+            ("2026-10-23T01:00:00+08:00", false, "holding_for_target"),
+            ("2026-10-23T03:00:00+08:00", false, "holding_for_target"),
+            ("2026-10-23T05:59:59+08:00", false, "holding_for_target"),
+            ("2026-10-23T06:00:00+08:00", true, "target_start_due"),
+            ("2026-10-23T09:00:00+08:00", true, "target_start_due"),
+            ("2026-10-23T11:00:00+08:00", true, "target_elapsed")
+        ] {
+            let now = try XCTUnwrap(formatter.date(from: stamp))
+            XCTAssertEqual(schedule.allowsRolling(at: now), allowed, stamp)
+            XCTAssertEqual(schedule.phase(at: now), phase, stamp)
+        }
+        var preferences = LimitPreferences.default
+        preferences.nextFiveHourResetTarget = target
+        let restored = try JSONDecoder().decode(LimitPreferences.self, from: JSONEncoder().encode(preferences))
+        XCTAssertEqual(restored.nextFiveHourResetTarget, target)
+        XCTAssertNil(try JSONDecoder().decode(LimitPreferences.self, from: Data("{}".utf8)).nextFiveHourResetTarget)
+    }
+
     func testRolloverWaitsForBoundaryAndBufferAndDoesNotDuplicate() {
         let now = Date()
         let end = now.addingTimeInterval(-61)
@@ -16,6 +80,24 @@ final class CodexLimitWidgetTests: XCTestCase {
         XCTAssertTrue(state.dueOpportunities(sample, now: end.addingTimeInterval(59)).isEmpty)
         state.attempted.formUnion(keys)
         XCTAssertTrue(state.dueOpportunities(sample, now: now).isEmpty)
+    }
+
+    func testScheduledHoldAlsoBlocksWeeklyRequestsAndActiveWindowConflicts() {
+        let target = Date(timeIntervalSince1970: 180000)
+        let start = target.addingTimeInterval(-18000)
+        var state = ResetRollingState(boundaries: ["5H": start.addingTimeInterval(-10800), "WEEK": start.addingTimeInterval(-7200)])
+        var sample = snapshot(updatedAt: start.addingTimeInterval(-3600))
+        sample.fiveHour = LimitWindowSnapshot(label: "5H", usedPercent: 0, windowDurationMins: 300, resetsAt: target)
+        sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 0, windowDurationMins: 10080, resetsAt: target)
+        XCTAssertTrue(state.dueOpportunities(sample, now: sample.updatedAt, target: target).isEmpty)
+        sample.updatedAt = start
+        let keys = state.dueOpportunities(sample, now: start, target: target)
+        XCTAssertEqual(keys.count, 2)
+        sample.fiveHour?.usedPercent = 1
+        XCTAssertTrue(state.dueOpportunities(sample, now: start, target: target).isEmpty)
+        sample.fiveHour?.usedPercent = 0
+        state.attempted.formUnion(keys)
+        XCTAssertTrue(state.dueOpportunities(sample, now: start, target: target).isEmpty)
     }
 
     func testRolloverDoesNotSendForAlreadyActiveWindowOrExhaustedWeeklyQuota() {

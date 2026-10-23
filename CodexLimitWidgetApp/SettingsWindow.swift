@@ -174,6 +174,8 @@ struct AppSettingsView: View {
     @State private var showsCLIInstallConfirmation = false
     @State private var showsResetConfirmation = false
     @State private var isResettingAppData = false
+    @State private var scheduleError: String?
+    @State private var resetTargetDraft = Calendar.current.nextDate(after: Date(), matching: DateComponents(hour: 11, minute: 0), matchingPolicy: .nextTime) ?? Date().addingTimeInterval(12 * 3600)
 
     init(
         viewModel: LimitViewModel,
@@ -186,6 +188,9 @@ struct AppSettingsView: View {
         self.focus = focus
         self.close = close
         _selectedTab = State(initialValue: SettingsTab(focus: focus))
+        if let target = viewModel.preferences.nextFiveHourResetTarget {
+            _resetTargetDraft = State(initialValue: target)
+        }
     }
 
     var body: some View {
@@ -280,6 +285,31 @@ struct AppSettingsView: View {
             }
             SettingsNote("After a reset, sends one minimal Codex request while on AC power. Uses subscription allowance. Weekly timing remains controlled by Codex. Uncertain sends are not retried.", palette: palette)
 
+            SettingsRow("Next 5-hour reset target", palette: palette) {
+                DatePicker("Target", selection: $resetTargetDraft, displayedComponents: [.date, .hourAndMinute])
+                    .labelsHidden()
+                    .environment(\.locale, Locale(identifier: "en_GB"))
+                Button("Schedule") {
+                    guard let target = ResetTargetSchedule.validatedTarget(resetTargetDraft, now: Date()) else {
+                        scheduleError = "Choose a target at least 5 hours from now."
+                        return
+                    }
+                    let saved = viewModel.updatePreferences { $0.nextFiveHourResetTarget = target }
+                    scheduleError = saved ? nil : "Could not save the target. Please try again."
+                }
+                .disabled(!viewModel.preferences.keepsResetWindowsRolling || resetTargetDraft.timeIntervalSinceNow < 5 * 3600)
+            }
+            if let target = viewModel.preferences.nextFiveHourResetTarget {
+                let schedule = ResetTargetSchedule(target: target)
+                SettingsNote("Target: \(scheduleDate(target)). Pause automatic rolls: \(scheduleDate(schedule.pauseAt)). Resume: \(scheduleDate(schedule.startAt)).", palette: palette)
+                Button("Clear target") {
+                    let saved = viewModel.updatePreferences { $0.nextFiveHourResetTarget = nil }
+                    scheduleError = saved ? nil : "Could not clear the target. Please try again."
+                }
+            }
+            if let scheduleError { SettingsNote(scheduleError, palette: palette) }
+            SettingsNote("One-time local date and time, at least 5 hours ahead. Rolling pauses 10 hours before the target and resumes 5 hours before it. Requires AC power and an awake Mac. Your own Codex usage may shift the reset. Normal rolling resumes after the target.", palette: palette)
+
             SettingsRow("Window design", palette: palette) {
                 SettingsSegmentedControl(
                     selection: binding(\.menuWindowDesign),
@@ -296,6 +326,12 @@ struct AppSettingsView: View {
                 )
             }
         }
+    }
+
+    private func scheduleDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE dd MMM HH:mm"
+        return formatter.string(from: date)
     }
 
     private func shortcutSection(palette: SettingsWindowPalette) -> some View {
