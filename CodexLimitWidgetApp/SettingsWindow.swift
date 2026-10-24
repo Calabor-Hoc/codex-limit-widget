@@ -507,40 +507,17 @@ struct AppSettingsView: View {
                     .font(palette.noteFont)
                     .foregroundStyle(palette.mutedText)
 
-                if let errorMessage = updateController.errorMessage {
-                    Text(errorMessage)
-                        .font(palette.noteFont)
-                        .foregroundStyle(Color(red: 0.92, green: 0.33, blue: 0.28))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if updateController.isUpdateAvailable {
-                    Button("Open release page") {
-                        close()
-                        updateController.openReleasePage()
-                    }
-                    .buttonStyle(.plain)
-                    .font(palette.noteFont)
-                    .foregroundStyle(palette.accent)
-                    .underline()
-                }
             }
 
             Spacer(minLength: 16)
 
             SettingsActionButton(
-                title: updateActionTitle,
-                systemImage: updateActionIcon,
+                title: "Open Maestro project",
+                systemImage: "arrow.up.right.square",
                 isDisabled: updateController.isBusy,
                 palette: palette
             ) {
-                Task {
-                    if updateController.isUpdateAvailable {
-                        await updateController.installAvailableUpdate()
-                    } else {
-                        await updateController.checkForUpdates()
-                    }
-                }
+                updateController.openReleasePage()
             }
         }
     }
@@ -667,22 +644,6 @@ struct AppSettingsView: View {
         )
     }
 
-    private var updateActionTitle: String {
-        switch updateController.phase {
-        case .checking:
-            return "Checking"
-        case .downloading:
-            return "Downloading"
-        case .installing:
-            return "Installing"
-        default:
-            return updateController.isUpdateAvailable ? "Update now" : "Check now"
-        }
-    }
-
-    private var updateActionIcon: String {
-        updateController.isUpdateAvailable ? "arrow.down.circle" : "arrow.clockwise"
-    }
 }
 
 /// Row label and note copy for one low-limit alert window.

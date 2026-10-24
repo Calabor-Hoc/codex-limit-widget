@@ -25,7 +25,7 @@ Right-click the desktop, choose **Edit Widgets**, search for **Maestro Limit**, 
 
 Maestro Limit has a separate bundle identifier, URL scheme, data directory, and local bridge port from the original app. The two apps can coexist. Its own internal identifiers and data directory remain stable across the product rename, preserving settings and history.
 
-Updates are installed locally from this fork. Automatic downloads and installation of upstream releases are disabled.
+Updates are installed manually from this fork. The Updates page links to the Maestro project and shows the installed version. Automatic checking, downloading, and installation are unavailable; upstream release fetching and app replacement code have been removed.
 
 ## Menu bar
 
