@@ -3,6 +3,69 @@ import XCTest
 @testable import Codex_Limit_Widget
 
 final class CodexLimitWidgetTests: XCTestCase {
+    func testZeroUsageStableResetAdvancesAndNextExpiryRollsAfterRestart() throws {
+        let start = Date(timeIntervalSince1970: 180000)
+        let old = start.addingTimeInterval(-61)
+        let reset = start.addingTimeInterval(18000)
+        var sample = snapshot(updatedAt: start)
+        sample.fiveHour = LimitWindowSnapshot(label: "5H", usedPercent: 0, windowDurationMins: 300, resetsAt: reset)
+        sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 0, windowDurationMins: 10080, resetsAt: start.addingTimeInterval(604800))
+        let oldKey = "5H:\(Int(old.timeIntervalSince1970 / 60))"
+        var state = ResetRollingState(boundaries: ["5H": old], attempted: [oldKey], lastAttempt: start)
+        state.observe(sample, now: start)
+        state.observe(sample, now: start.addingTimeInterval(30)) // cached reading is not new evidence
+        XCTAssertEqual(state.resetEvidence?["5H"]?.samples, 1)
+        sample.updatedAt = start.addingTimeInterval(30)
+        state.observe(sample, now: sample.updatedAt)
+        state = try JSONDecoder().decode(ResetRollingState.self, from: JSONEncoder().encode(state))
+        sample.updatedAt = start.addingTimeInterval(60)
+        state.observe(sample, now: sample.updatedAt)
+        XCTAssertEqual(state.boundaries["5H"], reset)
+        XCTAssertTrue(state.dueOpportunities(sample, now: sample.updatedAt).isEmpty)
+        XCTAssertTrue(state.attempted.contains(oldKey))
+        sample.updatedAt = reset.addingTimeInterval(61)
+        state.observe(sample, now: sample.updatedAt)
+        XCTAssertEqual(state.dueOpportunities(sample, now: sample.updatedAt), ["5H:\(Int(reset.timeIntervalSince1970 / 60))"])
+    }
+
+    func testSlidingZeroResetAndStaleReadingsCannotConfirm() {
+        let start = Date(timeIntervalSince1970: 180000)
+        let old = start.addingTimeInterval(-61)
+        var state = ResetRollingState(boundaries: ["5H": old, "WEEK": old])
+        var sample = snapshot(updatedAt: start)
+        for step in 0...5 {
+            sample.updatedAt = start.addingTimeInterval(Double(step * 30))
+            sample.fiveHour = LimitWindowSnapshot(label: "5H", usedPercent: 0, windowDurationMins: 300, resetsAt: sample.updatedAt.addingTimeInterval(18000))
+            sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 0, windowDurationMins: 10080, resetsAt: sample.updatedAt.addingTimeInterval(604800))
+            state.observe(sample, now: sample.updatedAt)
+        }
+        XCTAssertEqual(state.boundaries, ["5H": old, "WEEK": old])
+        state.observe(sample, now: sample.updatedAt.addingTimeInterval(91))
+        XCTAssertNil(state.resetEvidence)
+    }
+
+    func testWeeklyStableZeroResetAndLongGapRestartEvidence() {
+        let start = Date(timeIntervalSince1970: 180000)
+        let old = start.addingTimeInterval(-61)
+        let reset = start.addingTimeInterval(604800)
+        var state = ResetRollingState(boundaries: ["WEEK": old])
+        var sample = snapshot(updatedAt: start)
+        sample.weekly = LimitWindowSnapshot(label: "Week", usedPercent: 0, windowDurationMins: 10080, resetsAt: reset)
+        for offset in [0, 30, 1000, 1030] {
+            sample.updatedAt = start.addingTimeInterval(Double(offset))
+            state.observe(sample, now: sample.updatedAt)
+        }
+        XCTAssertEqual(state.boundaries["WEEK"], old)
+        sample.updatedAt = start.addingTimeInterval(1060)
+        state.observe(sample, now: sample.updatedAt)
+        XCTAssertEqual(state.boundaries["WEEK"], reset)
+    }
+
+    func testLegacyRollingStateStillLoads() throws {
+        let state = try JSONDecoder().decode(ResetRollingState.self, from: Data("{\"boundaries\":{},\"attempted\":[]}".utf8))
+        XCTAssertNil(state.resetEvidence)
+    }
+
     func testTargetValidationRoundsBeforeCheckingLeadTime() {
         let now = Date(timeIntervalSince1970: 125)
         XCTAssertNil(ResetTargetSchedule.validatedTarget(now.addingTimeInterval(18000), now: now))

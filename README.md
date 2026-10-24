@@ -102,7 +102,7 @@ The scheduler:
 5. Combines simultaneous due opportunities into one turn; sent attempts are at least one hour apart.
 6. Queries the installed Codex model catalog without starting a turn. It selects visible `gpt-6-luna`, otherwise `gpt-5.6-luna`; if neither is available, it sends nothing.
 7. Rechecks power, the enable switch, the schedule, and fresh usage after the model probe. It reserves the opportunity on disk immediately before sending. The isolated, ephemeral, read-only CLI turn asks only for “OK”, uses low reasoning, and ignores user config and project context.
-8. Rereads allowance after the attempt and logs whether a future reset and actual usage confirm a new window.
+8. Rereads allowance after the attempt. A newer future reset with nonzero usage is adopted immediately. When usage rounds to 0%, three distinct fresh readings of the same reset (within one second), spanning at least 60 seconds with no gap over ten minutes, allow adoption as `stable_reset_inferred`. A sliding “now + duration” clock is not adopted. Evidence survives restarts, while cached, stale, and future-dated readings cannot establish stability. This inference updates the scheduler's tracked boundary so the following expiry can roll even if usage stays at 0%.
 
 Requests consume subscription allowance. This feature cannot create extra quota, bypass an exhausted limit, reset an active window, or force an earlier weekly reset. The provider controls window behavior; a successful turn alone is not confirmation that either reset moved.
 
@@ -130,6 +130,7 @@ Each record includes timestamp, process ID, app version, log schema, event name,
 - `rollover_model_probe_started`, `rollover_no_supported_model`, `rollover_started`: capability checks and selected model.
 - `rollover_finished`, `rollover_uncertain`: exit status or error category, duration, and retry suppression.
 - `rollover_verified`: which reset opportunities were confirmed after the readback.
+- `rollover_window_confirmed`: persisted boundary adoption, with `nonzero_usage`, `stable_reset_inferred`, or `initial_tracking` as its basis. Stable-reset evidence is an inference, not a provider guarantee or proof that Maestro caused the change. Later polls can establish it without extra LLM requests. Decisions include `pendingStableResetSamples` for unfinished evidence.
 - Reservation failures and cancellation because of power or settings changes.
 
 A daily review can distinguish actual refresh attempts from waiting, model-turn success from reset confirmation, and AC/battery behavior across app sessions. Sleep and app-exit gaps are not by themselves proof of a scheduler failure. Missing battery or transition samples mean that behavior still needs observation.

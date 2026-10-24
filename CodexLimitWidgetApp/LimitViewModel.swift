@@ -28,9 +28,17 @@ enum LoginItemRegistrationPolicy {
 
 /// Persisted opportunities are independent of app restarts and model results.
 struct ResetRollingState: Codable {
+    struct ResetEvidence: Codable {
+        var reset: Date
+        var firstSample: Date
+        var lastSample: Date
+        var samples: Int
+    }
     var boundaries: [String: Date] = [:]
     var attempted: Set<String> = []
     var lastAttempt: Date?
+    // Optional for compatibility with existing reservation files.
+    var resetEvidence: [String: ResetEvidence]?
 
     static var url: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -50,13 +58,44 @@ struct ResetRollingState: Codable {
     }
 
     mutating func observe(_ snapshot: LimitSnapshot, now: Date) {
+        guard (0..<90).contains(now.timeIntervalSince(snapshot.updatedAt)) else {
+            resetEvidence = nil
+            return
+        }
         for (name, window) in [("5H", snapshot.fiveHour), ("WEEK", snapshot.weekly)] {
-            guard let window, let reset = window.resetsAt else { continue }
+            guard let window, let reset = window.resetsAt else {
+                resetEvidence?[name] = nil
+                continue
+            }
             if let existing = boundaries[name] {
-                // New actual usage has already anchored the next window. No ping
-                // is needed; an advancing zero-usage clock is not confirmation.
-                if reset.timeIntervalSince(existing) > 60 && window.usedPercent > 0 && reset > now {
+                guard reset.timeIntervalSince(existing) > 60, reset > now else {
+                    resetEvidence?[name] = nil
+                    continue
+                }
+                if window.usedPercent > 0 {
                     boundaries[name] = reset
+                    resetEvidence?[name] = nil
+                    continue
+                }
+                // A zero-usage reset can be a sliding "now + duration" clock.
+                // Require three distinct fresh readings spanning a minute,
+                // with no more than ten minutes between observations.
+                var evidence = resetEvidence?[name]
+                if let previous = evidence, snapshot.updatedAt <= previous.lastSample { continue }
+                if evidence == nil || abs(evidence!.reset.timeIntervalSince(reset)) > 1
+                    || snapshot.updatedAt.timeIntervalSince(evidence!.lastSample) > 600 {
+                    evidence = ResetEvidence(reset: reset, firstSample: snapshot.updatedAt,
+                                             lastSample: snapshot.updatedAt, samples: 1)
+                } else {
+                    evidence!.lastSample = snapshot.updatedAt
+                    evidence!.samples += 1
+                }
+                if resetEvidence == nil { resetEvidence = [:] }
+                resetEvidence?[name] = evidence
+                if let evidence, evidence.samples >= 3,
+                   evidence.lastSample.timeIntervalSince(evidence.firstSample) >= 60 {
+                    boundaries[name] = evidence.reset
+                    resetEvidence?[name] = nil
                 }
             } else if window.usedPercent > 0 || reset <= now {
                 boundaries[name] = reset
@@ -69,7 +108,7 @@ struct ResetRollingState: Codable {
             let schedule = ResetTargetSchedule(target: target)
             guard schedule.allowsRolling(at: now) else { return [] }
             if schedule.phase(at: now) == "target_start_due",
-               (snapshot.fiveHour?.usedPercent ?? 0) > 0,
+               ((snapshot.fiveHour?.usedPercent ?? 0) > 0 || boundaries["5H"] == snapshot.fiveHour?.resetsAt),
                (snapshot.fiveHour?.resetsAt ?? .distantPast) > now { return [] }
         }
         guard (0..<90).contains(now.timeIntervalSince(snapshot.updatedAt)),
@@ -185,15 +224,11 @@ final class LimitViewModel: ObservableObject {
     private func keepResetWindowsRolling() async {
         guard let snapshot, !isStartingResetWindow else { return }
         let now = Date()
-        rollingState.observe(snapshot, now: now)
-        do { try rollingState.save() } catch {
-            recordPollingEvent("rollover_state_save_failed", source: "unknown", interval: 30)
-            return
-        }
+        guard observeRollingSnapshot(snapshot, now: now) else { return }
         let schedule = preferences.nextFiveHourResetTarget.map { ResetTargetSchedule(target: $0) }
         let holding = schedule.map { !$0.allowsRolling(at: now) } ?? false
         let activeAtScheduledStart = schedule?.phase(at: now) == "target_start_due"
-            && (snapshot.fiveHour?.usedPercent ?? 0) > 0
+            && ((snapshot.fiveHour?.usedPercent ?? 0) > 0 || rollingState.boundaries["5H"] == snapshot.fiveHour?.resetsAt)
             && (snapshot.fiveHour?.resetsAt ?? .distantPast) > now
         let info = IOPSCopyPowerSourcesInfo().takeRetainedValue()
         let power = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? ?? "unknown"
@@ -208,6 +243,7 @@ final class LimitViewModel: ObservableObject {
                                       "opportunities": keys, "trackedResetTimes": dates,
                                       "reservedCount": rollingState.attempted.count,
                                       "snapshotUpdatedAt": ISO8601DateFormatter().string(from: snapshot.updatedAt)]
+        decision["pendingStableResetSamples"] = rollingState.resetEvidence?.mapValues { $0.samples } ?? [:]
         decision["fiveHourUsedPercent"] = snapshot.fiveHour?.usedPercent
         decision["weeklyUsedPercent"] = snapshot.weekly?.usedPercent
         if let reset = snapshot.fiveHour?.resetsAt { decision["observedFiveHourReset"] = ISO8601DateFormatter().string(from: reset) }
@@ -252,7 +288,7 @@ final class LimitViewModel: ObservableObject {
             // then persist a reservation only when a send is actually possible.
             let sendTime = Date()
             guard let latest = self.snapshot else { return }
-            rollingState.observe(latest, now: sendTime)
+            guard observeRollingSnapshot(latest, now: sendTime) else { return }
             let currentKeys = rollingState.dueOpportunities(latest, now: sendTime, target: schedule?.target)
             guard keys.allSatisfy(currentKeys.contains) else {
                 recordPollingEvent("rollover_cancelled_before_send", source: "AC Power", interval: 30,
@@ -291,7 +327,28 @@ final class LimitViewModel: ObservableObject {
             }
             recordPollingEvent("rollover_verified", source: "AC Power", interval: 30,
                                extra: ["confirmedOpportunities": confirmed, "opportunities": keys])
+            _ = observeRollingSnapshot(after, now: Date())
         }
+    }
+
+    /// Persist adoption before reporting confirmation. Later polls can confirm
+    /// a successful tiny turn without another consuming request.
+    private func observeRollingSnapshot(_ snapshot: LimitSnapshot, now: Date) -> Bool {
+        var next = rollingState
+        next.observe(snapshot, now: now)
+        do { try next.save() } catch {
+            recordPollingEvent("rollover_state_save_failed", source: lastObservedPowerSource ?? "unknown", interval: 30)
+            return false
+        }
+        for (name, reset) in next.boundaries where rollingState.boundaries[name] != reset {
+            let window = name == "5H" ? snapshot.fiveHour : snapshot.weekly
+            recordPollingEvent("rollover_window_confirmed", source: lastObservedPowerSource ?? "unknown", interval: Self.pollingInterval(onACPower: lastObservedPowerSource == kIOPSACPowerValue),
+                               extra: ["window": name, "resetAt": ISO8601DateFormatter().string(from: reset),
+                                       "basis": rollingState.boundaries[name] == nil ? "initial_tracking" : (window?.usedPercent ?? 0) > 0 ? "nonzero_usage" : "stable_reset_inferred",
+                                       "previousResetAt": rollingState.boundaries[name].map { ISO8601DateFormatter().string(from: $0) } ?? "none"])
+        }
+        rollingState = next
+        return true
     }
     /// Timestamp of the last explicit widget timeline reload. Background polls
     /// reuse it to skip a reload while the widget still shows a fresh reading.
